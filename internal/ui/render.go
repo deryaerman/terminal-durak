@@ -25,7 +25,7 @@ var cardSizes = []cardSize{{11, 9}, {9, 7}, {7, 5}}
 // card rows (opponent, table, your hand) plus some panels and text.
 func pickCardSize(width, height int) cardSize {
 	for _, s := range cardSizes {
-		if 3*s.h+9 <= height && 10*s.w+8 <= width {
+		if 3*s.h+11 <= height && 10*s.w+8 <= width {
 			return s
 		}
 	}
@@ -36,6 +36,19 @@ func pickCardSize(width, height int) cardSize {
 type renderer struct {
 	size  cardSize
 	trump cards.Suit
+	// hidden cards are mid-animation: their spot is left empty because the
+	// flying copy is drawn on top of the screen instead (see anim.go).
+	hidden map[cards.Card]bool
+}
+
+// blank is an empty card-sized block, drawn where a hidden card would be.
+func (r renderer) blank() string {
+	row := strings.Repeat(" ", r.size.w)
+	rows := make([]string, r.size.h)
+	for i := range rows {
+		rows[i] = row
+	}
+	return strings.Join(rows, "\n")
 }
 
 // cardFace lays out the inside of a card: rank top-left, suit in the middle,
@@ -132,6 +145,10 @@ func (r renderer) hand(hand []cards.Card, cursor int, playable func(cards.Card) 
 	cols := make([]string, len(hand))
 	for i, c := range hand {
 		dim := !playable(c)
+		if r.hidden[c] {
+			cols[i] = "\n" + r.blank()
+			continue
+		}
 		if i == cursor {
 			cols[i] = r.cardStyled(c, true, dim) + "\n"
 		} else {
@@ -142,13 +159,17 @@ func (r renderer) hand(hand []cards.Card, cursor int, playable func(cards.Card) 
 }
 
 // opponent draws the opponent's cards face down.
-func (r renderer) opponent(n int) string {
-	if n == 0 {
+func (r renderer) opponent(hand []cards.Card) string {
+	if len(hand) == 0 {
 		return dimStyle.Render("(no cards)")
 	}
-	backs := make([]string, n)
-	for i := range backs {
-		backs[i] = r.back()
+	backs := make([]string, len(hand))
+	for i, c := range hand {
+		if r.hidden[c] {
+			backs[i] = r.blank()
+		} else {
+			backs[i] = r.back()
+		}
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, backs...)
 }
@@ -156,12 +177,16 @@ func (r renderer) opponent(n int) string {
 // deck draws the side pile: remaining cards, a face-down card and the
 // face-up trump card that is drawn last.
 func (r renderer) deck(s *game.State, height int) string {
+	trump := r.card(s.Trump, false)
+	if r.hidden[s.Trump] {
+		trump = r.blank()
+	}
 	var pile string
 	switch {
 	case s.Deck.Len() > 1:
-		pile = lipgloss.JoinHorizontal(lipgloss.Center, r.back(), " ", r.card(s.Trump, false))
+		pile = lipgloss.JoinHorizontal(lipgloss.Center, r.back(), " ", trump)
 	case s.Deck.Len() == 1:
-		pile = r.card(s.Trump, false)
+		pile = trump
 	default:
 		pile = dimStyle.Render("empty")
 	}
@@ -212,8 +237,11 @@ func (r renderer) piles(s *game.State) string {
 	blocks := make([]string, 0, len(s.Table)*2)
 	for i, p := range s.Table {
 		attack := strings.Split(r.card(p.Attack, false), "\n")
+		if r.hidden[p.Attack] {
+			attack = strings.Split(feltBlock(w, h), "\n")
+		}
 		var lines []string
-		if p.Defense == nil {
+		if p.Defense == nil || r.hidden[*p.Defense] {
 			lines = attack
 		} else {
 			// The defense lies 2 down and 2 right of the attack card, so the

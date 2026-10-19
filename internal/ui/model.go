@@ -12,7 +12,6 @@
 package ui
 
 import (
-	"fmt"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -29,7 +28,7 @@ type opponentMoveMsg struct{}
 // TurnTime is the default time per turn; the menu can change or disable it.
 const TurnTime = 30 * time.Second
 
-// timerTickMsg arrives once a second while your turn timer runs. id says which
+// timerTickMsg arrives several times a second while your turn timer runs. id says which
 // timer sent it, so ticks from a timer that has since been reset are ignored.
 type timerTickMsg struct{ id int }
 
@@ -52,6 +51,11 @@ type Model struct {
 	menuCursor   int
 	paused       time.Duration // time left on your turn when the menu opened
 	timerChanged bool          // the timer setting changed while the menu was open
+
+	// Card animations (see anim.go).
+	anims      []anim
+	lastLayout layout // where every card was after the previous Update
+	animating  bool   // a frame loop is running
 }
 
 // New starts a fresh game with the default rules.
@@ -85,7 +89,8 @@ func (m Model) opponentIfTheirTurn() tea.Cmd {
 
 // tick asks Bubble Tea for a timerTickMsg one second from now.
 func tick(id int) tea.Cmd {
-	return tea.Tick(time.Second, func(time.Time) tea.Msg { return timerTickMsg{id} })
+	// Ticking 5× a second keeps the timer bar draining smoothly.
+	return tea.Tick(200*time.Millisecond, func(time.Time) tea.Msg { return timerTickMsg{id} })
 }
 
 // syncTimer starts a fresh timer whenever the move passes to you, and stops it
@@ -125,13 +130,21 @@ func opponentThinks() tea.Cmd {
 	})
 }
 
+// opponentRetry checks again shortly, used while cards are still flying.
+func opponentRetry() tea.Cmd {
+	return tea.Tick(150*time.Millisecond, func(time.Time) tea.Msg {
+		return opponentMoveMsg{}
+	})
+}
+
 // Update handles one message, then lets syncTimer start or stop the turn timer.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.update(msg)
 	nm, timerCmd := next.syncTimer()
-	// tea.Batch runs several commands at once (here: the opponent's move
-	// and the timer tick), skipping any that are nil.
-	return nm, tea.Batch(cmd, timerCmd)
+	nm, animCmd := nm.syncAnimations()
+	// tea.Batch runs several commands at once (here: the opponent's move,
+	// the timer tick and the next animation frame), skipping any that are nil.
+	return nm, tea.Batch(cmd, timerCmd, animCmd)
 }
 
 func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
@@ -140,6 +153,9 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+
+	case frameMsg:
+		return m.stepAnimations()
 
 	case timerTickMsg:
 		if msg.id != m.timerID || m.timerOwner != game.You {
@@ -160,6 +176,9 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 	case opponentMoveMsg:
 		if m.menuOpen {
 			return m, opponentThinks() // paused: try again in a moment
+		}
+		if len(m.anims) > 0 {
+			return m, opponentRetry() // let the cards land first
 		}
 		m.game.OpponentMove()
 		m.clampCursor()
@@ -256,20 +275,43 @@ func (m *Model) clampCursor() {
 
 // View draws the whole screen.
 func (m Model) View() tea.View {
+	screen, _ := m.render()
+	screen = m.withAnimations(screen) // flying cards on top (anim.go)
+	if m.menuOpen {
+		screen = m.withMenu(screen)
+	}
+
+	v := tea.NewView(screen)
+	v.AltScreen = true // draw on a separate full screen, restored on quit
+	v.WindowTitle = "Durak"
+	return v
+}
+
+// render draws the game screen and also reports where every visible card sits
+// on it (the layout), which the animations need to know where to fly from
+// and to.
+func (m Model) render() (string, layout) {
 	g := m.game
 	// Card size grows with the terminal, and everything is laid out to fill
 	// m.width × m.height exactly.
-	r := renderer{size: pickCardSize(m.width, m.height), trump: g.Trump.Suit}
+	r := m.renderer()
 	center := func(s string) string {
 		return lipgloss.PlaceHorizontal(m.width, lipgloss.Center, s)
 	}
 
-	opponent := center(r.opponent(len(g.Players[game.Opponent].Hand)))
+	// The badge rows sit right next to each player's cards and are always one
+	// line tall (blank when it isn't that player's turn).
+	oppCards := center(r.opponent(g.Players[game.Opponent].Hand))
+	opponent := lipgloss.JoinVertical(lipgloss.Left,
+		oppCards,
+		badgeRow(m.width, m.opponentBadge()))
 	// While it's your move, fade the cards the rules don't allow.
 	playable := func(c cards.Card) bool {
 		return g.Turn != game.You || g.CanPlay(game.You, c)
 	}
-	you := center(r.hand(g.Players[game.You].Hand, m.cursor, playable))
+	you := lipgloss.JoinVertical(lipgloss.Left,
+		badgeRow(m.width, m.youBadge(), m.timerBar()),
+		center(r.hand(g.Players[game.You].Hand, m.cursor, playable)))
 
 	status := statusStyle.Render(g.Status)
 	if m.err != nil {
@@ -277,7 +319,7 @@ func (m Model) View() tea.View {
 	}
 	footer := lipgloss.JoinVertical(lipgloss.Left,
 		"",
-		m.turnLine()+"  "+status,
+		m.turnLine()+status,
 		dimStyle.Render(m.helpLine()),
 	)
 
@@ -290,48 +332,35 @@ func (m Model) View() tea.View {
 
 	screen := lipgloss.JoinVertical(lipgloss.Left, opponent, middle, you, footer)
 
-	if m.menuOpen {
-		screen = m.withMenu(screen)
-	}
-
-	v := tea.NewView(screen)
-	v.AltScreen = true // draw on a separate full screen, restored on quit
-	v.WindowTitle = "Durak"
-	return v
+	lay := m.computeLayout(r, lipgloss.Height(opponent), midH,
+		lipgloss.Width(deck), tableW)
+	return screen, lay
 }
 
+// renderer returns a card renderer sized for the current terminal, hiding the
+// cards that are mid-flight.
+func (m Model) renderer() renderer {
+	return renderer{
+		size:   pickCardSize(m.width, m.height),
+		trump:  m.game.Trump.Suit,
+		hidden: m.hiddenCards(),
+	}
+}
+
+// turnLine prefixes the status with the result once the game is over. While
+// playing, the badges next to the cards show whose turn it is instead.
 func (m Model) turnLine() string {
 	g := m.game
 	switch {
-	case g.Over && g.Loser == game.Opponent:
-		return winStyle.Render("YOU WIN!")
-	case g.Over && g.Loser == game.You:
-		return errorStyle.Bold(true).Render("YOU LOSE.")
-	case g.Over:
-		return titleStyle.Render("DRAW.")
-	case g.Turn == game.Opponent:
-		return titleStyle.Render("Opponent is thinking…")
-	case g.Attacker == game.You:
-		return titleStyle.Render("Your attack.") + " " + m.clock()
-	default:
-		return titleStyle.Render("Defend!") + " " + m.clock()
-	}
-}
-
-// clock shows the seconds left on your turn, in red for the last few.
-func (m Model) clock() string {
-	if m.turnTime == 0 {
+	case !g.Over:
 		return ""
+	case g.Loser == game.Opponent:
+		return winStyle.Render("YOU WIN!") + "  "
+	case g.Loser == game.You:
+		return errorStyle.Bold(true).Render("YOU LOSE.") + "  "
+	default:
+		return titleStyle.Render("DRAW.") + "  "
 	}
-	left := m.timeLeft()
-	if m.menuOpen {
-		return dimStyle.Render(fmt.Sprintf("⏸ %ds", int(m.paused.Round(time.Second).Seconds())))
-	}
-	style := dimStyle
-	if left <= 5*time.Second {
-		style = errorStyle.Bold(true)
-	}
-	return style.Render(fmt.Sprintf("⏱ %ds", int(left.Seconds())))
 }
 
 func (m Model) helpLine() string {
