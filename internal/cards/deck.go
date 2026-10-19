@@ -3,6 +3,7 @@ package cards
 import (
 	"errors"
 	"math/rand/v2"
+	"slices"
 )
 
 // ErrNotEnoughCards is returned by Draw when the deck runs out.
@@ -26,7 +27,7 @@ func NewDeck() *Deck {
 	cards := make([]Card, 0, 36)
 	for s := Spades; s <= Clubs; s++ {
 		for n := Six; n <= Ace; n++ {
-			cards = append(cards, Card{n,s})
+			cards = append(cards, Card{n, s})
 		}
 	}
 	return &Deck{Cards: cards}
@@ -54,7 +55,11 @@ func (d *Deck) Draw(n int) ([]Card, error) {
 	if d.Len() < n {
 		return nil, ErrNotEnoughCards
 	}
-	drawn := d.Cards[d.Len()-n:]
+	// Clone copies the cards into a new slice. Without it, the drawn cards
+	// would still share memory with the deck, and two hands drawn one after
+	// the other would sit side by side in the same array: appending to one
+	// hand would overwrite the other.
+	drawn := slices.Clone(d.Cards[d.Len()-n:])
 	d.Cards = d.Cards[:d.Len()-n]
 	return drawn, nil
 

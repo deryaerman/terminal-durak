@@ -76,3 +76,15 @@ func TestDraw(t *testing.T) {
 		t.Errorf("a failed Draw must leave the deck untouched, %d left", d.Len())
 	}
 }
+
+// Drawn hands must not share memory: growing one must not change another.
+func TestDrawnHandsAreIndependent(t *testing.T) {
+	d := NewDeck()
+	first, _ := d.Draw(6)
+	second, _ := d.Draw(6)
+	before := first[0]
+	second = append(second, Card{Ace, Spades}, Card{Ace, Hearts})
+	if first[0] != before {
+		t.Fatalf("appending to the second hand changed the first: %v -> %v", before, first[0])
+	}
+}
