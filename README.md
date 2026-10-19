@@ -1,1 +1,110 @@
 # terminal-durak
+
+**Durak**, the classic Russian card game, played in your terminal. It's written in Go with [Bubble Tea](https://github.com/charmbracelet/bubbletea) and [Lip Gloss](https://github.com/charmbracelet/lipgloss).
+
+```
+                     ┏━━━━━┓┏━━━━━┓┏━━━━━┓┏━━━━━┓┏━━━━━┓
+                     ┃~*~*~┃┃~*~*~┃┃~*~*~┃┃~*~*~┃┃~*~*~┃
+                     ┃*(@)*┃┃*(@)*┃┃*(@)*┃┃*(@)*┃┃*(@)*┃
+                     ┃~*~*~┃┃~*~*~┃┃~*~*~┃┃~*~*~┃┃~*~*~┃
+                     ┗━━━━━┛┗━━━━━┛┗━━━━━┛┗━━━━━┛┗━━━━━┛
+┌─────────────────┐ ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+│ DECK 24         │ ┃ TABLE                                                  ┃
+│ ┏━━━━━┓ ┏━━━━━┓ │ ┃                                                        ┃
+│ ┃~*~*~┃ ┃J    ┃ │ ┃                   ┏━━━━━┓   ┏━━━━━┓                    ┃
+│ ┃*(@)*┃ ┃  ♣  ┃ │ ┃                   ┃8    ┃   ┃8    ┃                    ┃
+│ ┃~*~*~┃ ┃    J┃ │ ┃                   ┃  ♠  ┃   ┃  ♥  ┃                    ┃
+│ ┗━━━━━┛ ┗━━━━━┛ │ ┃                   ┃    8┃   ┃    8┃                    ┃
+│ trump ♣         │ ┃                   ┗━━━━━┛   ┗━━━━━┛                    ┃
+│ discarded 0     │ ┃                                                        ┃
+└─────────────────┘ ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+                     ╔═════╗
+                     ║7    ║┏━━━━━┓┏━━━━━┓┏━━━━━┓┏━━━━━┓
+                     ║  ♥  ║┃8    ┃┃A    ┃┃7    ┃┃9    ┃
+                     ║    7║┃  ♦  ┃┃  ♦  ┃┃  ♣  ┃┃  ♣  ┃
+                     ╚═════╝┃    8┃┃    A┃┃    7┃┃    9┃
+                            ┗━━━━━┛┗━━━━━┛┗━━━━━┛┗━━━━━┛
+
+Defend!  Opponent passed the attack on with 8♥
+```
+
+## Features
+
+- A full 36-card game (6 to Ace) against a computer opponent
+- Card art that scales with your terminal size, red and black suits, trump cards edged in gold, and cards you can't play faded out
+- Defence cards drawn overlapping the attack they beat, on a green felt table
+- Durak rules: attacks must match a rank already on the table, defend with a higher card of the same suit or with a trump, take the cards, throw more in, and **pass the attack on** (the "perevodnoy" variant)
+- The game ends and names the durak once the deck has run out
+
+## Install and run
+
+You need [Go](https://go.dev/dl/) 1.27 or newer.
+
+```bash
+git clone git@github.com:deryaerman/terminal-durak.git
+cd terminal-durak
+go run .
+```
+
+To build a standalone binary instead:
+
+```bash
+go build -o durak .
+./durak
+```
+
+## Controls
+
+| Key | Action |
+|---|---|
+| `←` `→` / `h` `l` | Select a card |
+| `enter` | Play the selected card: attack, throw in, or defend |
+| `r` | Pass the attack on with a card of the same rank (when defending) |
+| `t` | Take every card on the table (when defending) |
+| `space` | End your turn. As the attacker, this ends the round once everything is beaten |
+| `s` | Sort your hand (trumps last) |
+| `n` | Start a new game (after a game ends) |
+| `q` / `ctrl+c` | Quit |
+
+## How to play
+
+Each player starts with 6 cards. The bottom card of the deck is turned face up, and its suit is **trump** for the whole game.
+
+1. The **attacker** plays any card. After that, they may only throw in cards whose rank is already on the table.
+2. The **defender** beats each attack with a higher card of the same suit, or with any trump. A trump only loses to a higher trump.
+3. Before beating anything, the defender may instead **pass the attack on** by adding a card of the same rank. The roles then swap.
+4. If the defender beats everything, those cards are discarded and the defender attacks next. If they can't (or won't), they **take** every card on the table and the same attacker goes again.
+5. After each round, both players draw back up to 6 cards, attacker first.
+
+Once the deck is empty, the first player to get rid of all their cards wins. The player left holding cards is the **durak**, "the fool".
+
+## Project layout
+
+```
+main.go              starts the Bubble Tea program
+internal/cards/      Card, Suit, Rank and Deck: the building blocks
+internal/game/       match state, rules and the computer opponent (no UI code)
+internal/ui/         Bubble Tea model (Update/View) and Lip Gloss rendering
+```
+
+The `game` package knows nothing about the terminal, so the same rules can later drive a network game or a smarter bot.
+
+## Development
+
+```bash
+go test ./...   # run the tests
+go vet ./...    # static checks
+go fmt ./...    # format the code
+```
+
+## Roadmap
+
+- [ ] Mouse support: click a card to play it
+- [ ] Card animations
+- [ ] A smarter computer opponent
+- [ ] Online multiplayer
+- [ ] More than two players
+
+## License
+
+[MIT](LICENSE)

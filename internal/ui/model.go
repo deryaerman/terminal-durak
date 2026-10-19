@@ -12,6 +12,7 @@
 package ui
 
 import (
+	"fmt"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -25,6 +26,13 @@ import (
 // Any type can be a message; an empty struct is the usual choice for a signal.
 type opponentMoveMsg struct{}
 
+// TurnTime is how long a player has for their move before the game moves on.
+const TurnTime = 30 * time.Second
+
+// timerTickMsg arrives once a second while your turn timer runs. id says which
+// timer sent it, so ticks from a timer that has since been reset are ignored.
+type timerTickMsg struct{ id int }
+
 // Model is the whole UI state.
 type Model struct {
 	game   *game.State
@@ -32,15 +40,53 @@ type Model struct {
 	err    error
 	width  int
 	height int
+
+	// Turn timer: when your move must be made by, and which timer is current.
+	deadline   time.Time
+	timerID    int
+	timerOwner int // whose turn the running timer belongs to, -1 if none
 }
 
 // New starts a fresh game.
 func New() Model {
-	return Model{game: game.New(), width: 100, height: 30}
+	return Model{game: game.New(), width: 100, height: 30, timerOwner: -1}
 }
 
-// Init runs once at start-up. We have no background work yet, so it returns nil.
-func (m Model) Init() tea.Cmd { return nil }
+// Init runs once at start-up and starts the first turn timer.
+func (m Model) Init() tea.Cmd {
+	_, cmd := m.syncTimer()
+	return cmd
+}
+
+// tick asks Bubble Tea for a timerTickMsg one second from now.
+func tick(id int) tea.Cmd {
+	return tea.Tick(time.Second, func(time.Time) tea.Msg { return timerTickMsg{id} })
+}
+
+// syncTimer starts a fresh timer whenever the move passes to you, and stops it
+// when it passes away from you or the game ends. It's called after every
+// Update, so no individual key handler has to remember to reset the timer.
+func (m Model) syncTimer() (Model, tea.Cmd) {
+	owner := -1
+	if !m.game.Over && m.game.Turn == game.You {
+		owner = game.You
+	}
+	if owner == m.timerOwner {
+		return m, nil // same player still on the move: keep counting down
+	}
+	m.timerOwner = owner
+	m.timerID++ // any tick still in flight for the old timer is now stale
+	if owner < 0 {
+		return m, nil
+	}
+	m.deadline = time.Now().Add(TurnTime)
+	return m, tick(m.timerID)
+}
+
+// timeLeft is how long you have left, rounded up to whole seconds.
+func (m Model) timeLeft() time.Duration {
+	return max(0, time.Until(m.deadline)).Round(time.Second)
+}
 
 // opponentThinks waits a moment, then delivers opponentMoveMsg to Update.
 // tea.Tick is a command: Bubble Tea runs it in the background and sends its
@@ -51,13 +97,34 @@ func opponentThinks() tea.Cmd {
 	})
 }
 
-// Update handles one message and returns the updated model.
+// Update handles one message, then lets syncTimer start or stop the turn timer.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	nm, timerCmd := next.syncTimer()
+	// tea.Batch runs several commands at once (here: the opponent's move
+	// and the timer tick), skipping any that are nil.
+	return nm, tea.Batch(cmd, timerCmd)
+}
+
+func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 	// A "type switch": run a different branch depending on the message's type.
 	switch msg := msg.(type) {
 
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+
+	case timerTickMsg:
+		if msg.id != m.timerID || m.timerOwner != game.You {
+			return m, nil // a stale tick from a timer that was reset
+		}
+		if time.Now().Before(m.deadline) {
+			return m, tick(msg.id) // keep ticking: each tick redraws the countdown
+		}
+		m.game.Timeout(game.You)
+		m.clampCursor()
+		if !m.game.Over && m.game.Turn == game.Opponent {
+			return m, opponentThinks()
+		}
 
 	case opponentMoveMsg:
 		m.game.OpponentMove()
@@ -76,7 +143,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "n":
 			if m.game.Over {
-				return New().withSize(m.width, m.height), nil
+				nm := New().withSize(m.width, m.height)
+				nm.timerID = m.timerID // so the old game's ticks stay stale
+				return nm, nil
 			}
 
 		case "left", "h":
@@ -198,10 +267,20 @@ func (m Model) turnLine() string {
 	case g.Turn == game.Opponent:
 		return titleStyle.Render("Opponent is thinking…")
 	case g.Attacker == game.You:
-		return titleStyle.Render("Your attack.")
+		return titleStyle.Render("Your attack.") + " " + m.clock()
 	default:
-		return titleStyle.Render("Defend!")
+		return titleStyle.Render("Defend!") + " " + m.clock()
 	}
+}
+
+// clock shows the seconds left on your turn, in red for the last few.
+func (m Model) clock() string {
+	left := m.timeLeft()
+	style := dimStyle
+	if left <= 5*time.Second {
+		style = errorStyle.Bold(true)
+	}
+	return style.Render(fmt.Sprintf("⏱ %ds", int(left.Seconds())))
 }
 
 func (m Model) helpLine() string {
