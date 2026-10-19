@@ -58,4 +58,11 @@ var (
 			BorderForeground(colEdge)
 
 	winStyle = lipgloss.NewStyle().Bold(true).Foreground(colSelect)
+
+	// The rules menu popup and its highlighted row.
+	menuStyle = lipgloss.NewStyle().
+			Border(lipgloss.ThickBorder()).
+			BorderForeground(colSelect).
+			Padding(1, 3)
+	selectStyle = lipgloss.NewStyle().Bold(true).Foreground(colSelect)
 )

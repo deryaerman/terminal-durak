@@ -21,6 +21,20 @@ func (s *State) AutoMove(p int) {
 }
 
 func (s *State) botAttack(p int) {
+	if s.Taking {
+		// The defender is taking: hand over every cheap matching card.
+		for {
+			i := s.cheapest(s.Players[p].Hand, func(c cards.Card) bool {
+				return c.Suit != s.Trump.Suit && s.checkAttack(c) == nil
+			})
+			if i < 0 {
+				break
+			}
+			_ = s.Play(p, i)
+		}
+		_ = s.EndTurn()
+		return
+	}
 	hand := s.Players[p].Hand
 	pick := -1
 	if len(s.Table) == 0 {
@@ -108,11 +122,7 @@ func (s *State) Timeout(p int) {
 		s.Turn = 1 - p
 		s.Status = name + " ran out of time — the cheapest card was played"
 	case p == s.Attacker:
-		if s.Undefended() < 0 {
-			_ = s.EndTurn()
-		} else {
-			s.Turn = 1 - p
-		}
+		_ = s.EndTurn()
 		s.Status = name + " ran out of time — attack over"
 	default:
 		s.Take()

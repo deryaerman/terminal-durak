@@ -63,20 +63,32 @@ go build -o durak .
 | `t` | Take every card on the table (when defending) |
 | `space` | End your turn. As the attacker, this ends the round once everything is beaten |
 | `s` | Sort your hand (trumps last) |
+| `m` | Open the rules menu (pauses the game) |
 | `n` | Start a new game (after a game ends) |
 | `q` / `ctrl+c` | Quit |
 
 ## How to play
 
-Each player starts with 6 cards. The bottom card of the deck is turned face up, and its suit is **trump** for the whole game.
+Each player starts with 6 cards. The bottom card of the deck is turned face up, and its suit is **trump** for the whole game. Whoever holds the lowest trump attacks first.
 
 1. The **attacker** plays any card. After that, they may only throw in cards whose rank is already on the table.
 2. The **defender** beats each attack with a higher card of the same suit, or with any trump. A trump only loses to a higher trump.
 3. Before beating anything, the defender may instead **pass the attack on** by adding a card of the same rank. The roles then swap.
-4. If the defender beats everything, those cards are discarded and the defender attacks next. If they can't (or won't), they **take** every card on the table and the same attacker goes again.
-5. After each round, both players draw back up to 6 cards, attacker first.
+4. If the defender beats everything, those cards are discarded and the defender attacks next. If they can't (or won't), they **take** every card on the table. The attacker may first throw in more matching cards for them to pick up, and then attacks again.
+5. After each round, both players draw back up to 6 cards. The player who started the round draws first.
 
 Once the deck is empty, the first player to get rid of all their cards wins. The player left holding cards is the **durak**, "the fool".
+
+### House rules
+
+Press `m` to change these. They apply straight away and carry over to new games.
+
+| Rule | Default | What it does |
+|---|---|---|
+| Pass the attack on | on | Allows passing an attack on with a card of the same rank. Turn it off for plain throw-in (podkidnoy) Durak. |
+| Pass on with several cards | off | After passing on, you may add more cards of that rank before your opponent defends. |
+| Throw in after take | on | Once the defender gives up, the attacker may still add matching cards for them to pick up. |
+| Turn timer | 30s | Off, 15s, 30s or 60s. When it runs out, the game moves on for you: you lead your cheapest card, end your attack, or take the cards. |
 
 ## Project layout
 

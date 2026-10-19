@@ -34,13 +34,32 @@ type Player struct {
 	Hand []cards.Card
 }
 
+// Rules are the house rules a match is played with. The UI's menu edits them.
+type Rules struct {
+	// PassOn lets the defender pass the attack on with a card of the same
+	// rank ("perevodnoy" Durak). Off gives plain throw-in ("podkidnoy") Durak.
+	PassOn bool
+	// PassOnMany lets the defender pass the attack on with several cards of
+	// that rank at once, not just one.
+	PassOnMany bool
+	// ThrowInAfterTake lets the attacker add more matching cards after the
+	// defender decides to take; the defender then picks those up too.
+	ThrowInAfterTake bool
+}
+
+// DefaultRules are the classic rules: pass-on Durak with throw-in after take.
+var DefaultRules = Rules{PassOn: true, ThrowInAfterTake: true}
+
 // State is everything about one match.
 type State struct {
+	Rules    Rules
 	Deck     *cards.Deck
 	Trump    cards.Card // the face-up card under the deck; its suit is trump
 	Players  [2]*Player
 	Table    []Pair
-	Attacker int    // who is attacking this round (You or Opponent)
+	Attacker int    // who is attacking right now (changes when the attack is passed on)
+	Leader   int    // who started this round's attack; draws first when it ends
+	Taking   bool   // the defender has given up; the attacker may still add cards
 	Turn     int    // whose move it is right now
 	Discards int    // cards beaten and removed from play
 	Status   string // last thing that happened, shown to the player
@@ -58,14 +77,21 @@ var (
 	ErrGameOver       = errors.New("the game is over — press n for a new game")
 	ErrNothingPlayed  = errors.New("play at least one card first")
 	ErrCannotTransfer = errors.New("can't pass on: ranks must match, nothing defended yet, and they need enough cards")
+	ErrMustBeatOrTake = errors.New("beat every card or take them (t)")
+	ErrTaking         = errors.New("you're taking the cards — wait for the attacker")
 )
 
-// New shuffles a deck, deals six cards each and turns up the trump card.
-func New() *State {
+// New starts a match with the default rules.
+func New() *State { return NewWithRules(DefaultRules) }
+
+// NewWithRules shuffles a deck, deals six cards each, turns up the trump card
+// and lets the holder of the lowest trump attack first.
+func NewWithRules(r Rules) *State {
 	d := cards.NewDeck()
 	d.Shuffle()
 
 	s := &State{
+		Rules:   r,
 		Deck:    d,
 		Players: [2]*Player{{Name: "You"}, {Name: "Opponent"}},
 	}
@@ -76,10 +102,29 @@ func New() *State {
 	// The trump card is the bottom of the deck (index 0, since we draw from
 	// the end). It stays in the deck and is the last card drawn.
 	s.Trump = d.Cards[0]
-	s.Attacker, s.Turn = You, You
-	s.Status = "You attack first. Pick a card and press enter."
+	s.Attacker = s.lowestTrumpHolder()
+	s.Leader, s.Turn = s.Attacker, s.Attacker
+	if s.Attacker == You {
+		s.Status = "You hold the lowest trump, so you attack first."
+	} else {
+		s.Status = "The opponent holds the lowest trump and attacks first."
+	}
 	s.SortHand(You)
 	return s
+}
+
+// lowestTrumpHolder returns the player holding the lowest trump. If nobody
+// holds a trump, you start.
+func (s *State) lowestTrumpHolder() int {
+	best, bestRank := You, cards.Ace+1
+	for p, pl := range s.Players {
+		for _, c := range pl.Hand {
+			if c.Suit == s.Trump.Suit && c.Rank < bestRank {
+				best, bestRank = p, c.Rank
+			}
+		}
+	}
+	return best
 }
 
 // Beats reports whether defense beats attack: a higher card of the same suit,
@@ -119,6 +164,9 @@ func (s *State) Play(p, i int) error {
 		}
 		s.Table = append(s.Table, Pair{Attack: card})
 	} else {
+		if s.Taking {
+			return ErrTaking
+		}
 		u := s.Undefended()
 		if u < 0 {
 			return ErrNothingToDo
@@ -188,7 +236,7 @@ func (s *State) CanPlay(p int, card cards.Card) bool {
 // nothing has been defended yet, every attack has the same rank as card, and
 // the other player holds enough cards to face all of them.
 func (s *State) CanTransfer(card cards.Card) bool {
-	if len(s.Table) == 0 {
+	if !s.Rules.PassOn || s.Taking || len(s.Table) == 0 || len(s.Table) >= HandSize {
 		return false
 	}
 	for _, p := range s.Table {
@@ -215,8 +263,13 @@ func (s *State) Transfer(p, i int) error {
 	s.Table = append(s.Table, Pair{Attack: card})
 	s.Players[p].Hand = slices.Delete(s.Players[p].Hand, i, i+1)
 	s.Attacker = p
-	s.Turn = s.Defender()
 	s.Status = fmt.Sprintf("%s passed the attack on with %v", s.Players[p].Name, card)
+	if s.Rules.PassOnMany && s.canAdd(p) {
+		// Stay on the move to add more cards of the same rank.
+		s.Status += fmt.Sprintf(" — add more %ss or press space", card.Rank.Label())
+		return nil
+	}
+	s.Turn = s.Defender()
 	return nil
 }
 
@@ -230,21 +283,51 @@ func (s *State) EndTurn() error {
 		if len(s.Table) == 0 {
 			return ErrNothingPlayed
 		}
+		if s.Taking { // done adding: the defender picks everything up
+			s.collect()
+			return nil
+		}
 		if s.Undefended() < 0 {
 			s.finishRound(false)
 			return nil
 		}
+	} else if s.Undefended() >= 0 {
+		return ErrMustBeatOrTake // a defender can't just walk away
 	}
 	s.Turn = 1 - s.Turn
 	return nil
 }
 
-// Take makes the defender pick up every card on the table. The attacker keeps
-// attacking next round.
+// Take means the defender gives up and will pick up every card on the table.
+// If the rules allow it and the attacker has matching cards, the attacker may
+// first throw in more (see EndTurn); otherwise the cards are collected now.
+// Either way the same attacker attacks again next round.
 func (s *State) Take() {
-	if s.Over {
+	if s.Over || s.Taking {
 		return
 	}
+	s.Taking = true
+	if s.Rules.ThrowInAfterTake && s.canAdd(s.Attacker) {
+		s.Turn = s.Attacker
+		s.Status = fmt.Sprintf("%s will take — %s may add more cards, then space",
+			s.Players[s.Defender()].Name, s.Players[s.Attacker].Name)
+		return
+	}
+	s.collect()
+}
+
+// canAdd reports whether player p (attacking) could legally add any card.
+func (s *State) canAdd(p int) bool {
+	for _, c := range s.Players[p].Hand {
+		if s.checkAttack(c) == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// collect moves every card on the table into the defender's hand.
+func (s *State) collect() {
 	d := s.Players[s.Defender()]
 	for _, pair := range s.Table {
 		d.Hand = append(d.Hand, pair.Attack)
@@ -265,12 +348,15 @@ func (s *State) finishRound(taken bool) {
 		s.Status = "All attacks beaten — the cards are discarded"
 	}
 	s.Table = nil
-	s.DrawUp(s.Attacker)
-	s.DrawUp(s.Defender())
+	s.Taking = false
+	// The player who started the round draws first, even if the attack was
+	// passed on since; then the other player.
+	s.DrawUp(s.Leader)
+	s.DrawUp(1 - s.Leader)
 	if !taken {
 		s.Attacker = s.Defender()
 	}
-	s.Turn = s.Attacker
+	s.Leader, s.Turn = s.Attacker, s.Attacker
 	s.SortHand(You)
 	s.checkGameOver()
 }

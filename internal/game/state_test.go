@@ -13,7 +13,7 @@ func fixed(trump cards.Suit, you, opp []cards.Card) *State {
 	s.Players[You].Hand = you
 	s.Players[Opponent].Hand = opp
 	s.Table = nil
-	s.Attacker, s.Turn = You, You
+	s.Attacker, s.Leader, s.Turn = You, You, You
 	return s
 }
 

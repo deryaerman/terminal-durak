@@ -26,7 +26,7 @@ import (
 // Any type can be a message; an empty struct is the usual choice for a signal.
 type opponentMoveMsg struct{}
 
-// TurnTime is how long a player has for their move before the game moves on.
+// TurnTime is the default time per turn; the menu can change or disable it.
 const TurnTime = 30 * time.Second
 
 // timerTickMsg arrives once a second while your turn timer runs. id says which
@@ -44,18 +44,43 @@ type Model struct {
 	// Turn timer: when your move must be made by, and which timer is current.
 	deadline   time.Time
 	timerID    int
-	timerOwner int // whose turn the running timer belongs to, -1 if none
+	timerOwner int           // whose turn the running timer belongs to, -1 if none
+	turnTime   time.Duration // time per turn; 0 means no timer
+
+	// Rules menu (see menu.go).
+	menuOpen     bool
+	menuCursor   int
+	paused       time.Duration // time left on your turn when the menu opened
+	timerChanged bool          // the timer setting changed while the menu was open
 }
 
-// New starts a fresh game.
-func New() Model {
-	return Model{game: game.New(), width: 100, height: 30, timerOwner: -1}
+// New starts a fresh game with the default rules.
+func New() Model { return newGame(game.DefaultRules, TurnTime) }
+
+// newGame starts a fresh game with the given rules and turn time.
+func newGame(r game.Rules, turnTime time.Duration) Model {
+	return Model{
+		game:       game.NewWithRules(r),
+		width:      100,
+		height:     30,
+		timerOwner: -1,
+		turnTime:   turnTime,
+	}
 }
 
-// Init runs once at start-up and starts the first turn timer.
+// Init runs once at start-up: it starts your turn timer, or lets the
+// opponent move if they hold the lowest trump.
 func (m Model) Init() tea.Cmd {
 	_, cmd := m.syncTimer()
-	return cmd
+	return tea.Batch(cmd, m.opponentIfTheirTurn())
+}
+
+// opponentIfTheirTurn schedules the opponent's move when it's their turn.
+func (m Model) opponentIfTheirTurn() tea.Cmd {
+	if !m.game.Over && m.game.Turn == game.Opponent {
+		return opponentThinks()
+	}
+	return nil
 }
 
 // tick asks Bubble Tea for a timerTickMsg one second from now.
@@ -67,8 +92,11 @@ func tick(id int) tea.Cmd {
 // when it passes away from you or the game ends. It's called after every
 // Update, so no individual key handler has to remember to reset the timer.
 func (m Model) syncTimer() (Model, tea.Cmd) {
+	if m.menuOpen {
+		return m, nil // paused
+	}
 	owner := -1
-	if !m.game.Over && m.game.Turn == game.You {
+	if m.turnTime > 0 && !m.game.Over && m.game.Turn == game.You {
 		owner = game.You
 	}
 	if owner == m.timerOwner {
@@ -79,7 +107,7 @@ func (m Model) syncTimer() (Model, tea.Cmd) {
 	if owner < 0 {
 		return m, nil
 	}
-	m.deadline = time.Now().Add(TurnTime)
+	m.deadline = time.Now().Add(m.turnTime)
 	return m, tick(m.timerID)
 }
 
@@ -117,6 +145,9 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 		if msg.id != m.timerID || m.timerOwner != game.You {
 			return m, nil // a stale tick from a timer that was reset
 		}
+		if m.menuOpen {
+			return m, tick(msg.id) // paused: keep the timer alive, don't count
+		}
 		if time.Now().Before(m.deadline) {
 			return m, tick(msg.id) // keep ticking: each tick redraws the countdown
 		}
@@ -127,6 +158,9 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 
 	case opponentMoveMsg:
+		if m.menuOpen {
+			return m, opponentThinks() // paused: try again in a moment
+		}
 		m.game.OpponentMove()
 		m.clampCursor()
 		if !m.game.Over && m.game.Turn == game.Opponent {
@@ -134,6 +168,9 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 
 	case tea.KeyPressMsg:
+		if m.menuOpen {
+			return m.updateMenu(msg)
+		}
 		m.err = nil
 		hand := m.game.Players[game.You].Hand
 
@@ -141,11 +178,15 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 
+		case "m":
+			return m.openMenu(), nil
+
 		case "n":
 			if m.game.Over {
-				nm := New().withSize(m.width, m.height)
+				// Keep the rules and timer setting chosen in the menu.
+				nm := newGame(m.game.Rules, m.turnTime).withSize(m.width, m.height)
 				nm.timerID = m.timerID // so the old game's ticks stay stale
-				return nm, nil
+				return nm, nm.opponentIfTheirTurn()
 			}
 
 		case "left", "h":
@@ -249,6 +290,10 @@ func (m Model) View() tea.View {
 
 	screen := lipgloss.JoinVertical(lipgloss.Left, opponent, middle, you, footer)
 
+	if m.menuOpen {
+		screen = m.withMenu(screen)
+	}
+
 	v := tea.NewView(screen)
 	v.AltScreen = true // draw on a separate full screen, restored on quit
 	v.WindowTitle = "Durak"
@@ -275,7 +320,13 @@ func (m Model) turnLine() string {
 
 // clock shows the seconds left on your turn, in red for the last few.
 func (m Model) clock() string {
+	if m.turnTime == 0 {
+		return ""
+	}
 	left := m.timeLeft()
+	if m.menuOpen {
+		return dimStyle.Render(fmt.Sprintf("⏸ %ds", int(m.paused.Round(time.Second).Seconds())))
+	}
 	style := dimStyle
 	if left <= 5*time.Second {
 		style = errorStyle.Bold(true)
@@ -285,11 +336,14 @@ func (m Model) clock() string {
 
 func (m Model) helpLine() string {
 	if m.game.Over {
-		return "n new game · q quit"
+		return "n new game · m rules · q quit"
 	}
 	help := "←/→ select · enter play · space end turn · "
 	if m.game.Defender() == game.You {
-		help += "r pass on · t take cards · "
+		if m.game.Rules.PassOn {
+			help += "r pass on · "
+		}
+		help += "t take cards · "
 	}
-	return help + "d draw · s sort · q quit"
+	return help + "s sort · m rules · q quit"
 }

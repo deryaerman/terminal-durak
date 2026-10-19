@@ -7,8 +7,15 @@ import (
 	"durak/internal/game"
 )
 
-func TestTimerStartsOnYourTurn(t *testing.T) {
+// newYouFirst starts a UI game where you attack first.
+func newYouFirst() Model {
 	m := New()
+	m.game.Attacker, m.game.Leader, m.game.Turn = game.You, game.You, game.You
+	return m
+}
+
+func TestTimerStartsOnYourTurn(t *testing.T) {
+	m := newYouFirst()
 	if cmd := m.Init(); cmd == nil {
 		t.Fatal("Init should start the timer: you move first")
 	}
@@ -19,7 +26,7 @@ func TestTimerStartsOnYourTurn(t *testing.T) {
 }
 
 func TestTimerExpiryAdvancesGame(t *testing.T) {
-	m := New()
+	m := newYouFirst()
 	m, _ = m.syncTimer()
 	m.deadline = time.Now().Add(-time.Second) // time is up
 
@@ -34,7 +41,7 @@ func TestTimerExpiryAdvancesGame(t *testing.T) {
 }
 
 func TestStaleTickIgnored(t *testing.T) {
-	m := New()
+	m := newYouFirst()
 	m, _ = m.syncTimer()
 	m.deadline = time.Now().Add(-time.Second)
 
