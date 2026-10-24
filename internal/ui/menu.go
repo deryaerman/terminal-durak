@@ -55,10 +55,11 @@ var menuItems = []menuItem{
 	},
 	{
 		label: "Opponent",
-		help:  "Easy plays simply. Normal counts cards and plays endings perfectly. Hard also imagines many possible deals and plays each move out to the end.",
+		help:  "Easy plays simply. Normal counts cards and plays endings perfectly. Hard also imagines many possible deals and plays each move out to the end. Hard+ thinks for half a second per move. Expert grows a search tree over the imagined deals (ISMCTS) for half a second.",
 		value: func(m *Model) string { return m.game.Rules.Difficulty.String() },
 		change: func(m *Model, dir int) {
-			d := (int(m.game.Rules.Difficulty) + dir + 3) % 3 // wrap around both ways
+			n := game.NumDifficulties
+			d := ((int(m.game.Rules.Difficulty)+dir)%n + n) % n // wrap around both ways
 			m.game.Rules.Difficulty = game.Difficulty(d)
 		},
 	},

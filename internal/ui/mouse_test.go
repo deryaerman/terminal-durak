@@ -88,3 +88,29 @@ func TestMenuMouse(t *testing.T) {
 		t.Error("clicking outside the menu should close it")
 	}
 }
+
+// When the last attack is beaten and the attacker has nothing to add, the
+// table stays visible until the advance pause is over.
+func TestPauseBeforeTableClears(t *testing.T) {
+	m := ready()
+	m.game.Players[game.You].Hand = []cards.Card{{Rank: cards.Seven, Suit: cards.Spades}, {Rank: cards.Ace, Suit: cards.Diamonds}}
+	m.game.Players[game.Opponent].Hand = []cards.Card{{Rank: cards.King, Suit: cards.Spades}, {Rank: cards.Six, Suit: cards.Clubs}}
+	m.game.Trump = cards.Card{Rank: cards.Six, Suit: cards.Hearts}
+	m.cursor = 0
+	m = send(m, tea.KeyPressMsg{Code: tea.KeyEnter}) // lead 7♠; no other seven, so it passes on
+	if m.game.Turn != game.Opponent {
+		t.Fatal("setup: the opponent should be defending")
+	}
+	m.game.Rules.Difficulty = game.Normal
+	m = send(m, opponentMoveMsg{}) // K♠ beats it; you can't add anything
+	if len(m.game.Table) != 1 || m.game.Table[0].Defense == nil {
+		t.Fatalf("the beaten pair should stay on the table for now: %+v", m.game.Table)
+	}
+	if !m.advancePending {
+		t.Fatal("an advance should be scheduled")
+	}
+	m = send(m, advanceMsg{ply: m.game.Ply})
+	if len(m.game.Table) != 0 {
+		t.Fatal("after the pause the round should end")
+	}
+}

@@ -25,6 +25,22 @@ import (
 // Any type can be a message; an empty struct is the usual choice for a signal.
 type opponentMoveMsg struct{}
 
+// botMoveMsg carries a move a slow bot (hard+, expert) worked out in the background. The
+// state pointer and move count say which position it was meant for.
+type botMoveMsg struct {
+	state *game.State
+	ply   int
+	move  game.Move
+}
+
+// advanceMsg ends a stuck attacker's turn after a pause, so the last card
+// played stays visible for a moment before the table clears.
+type advanceMsg struct{ ply int }
+
+// advanceDelay is how long the table stays put before a stuck attacker's
+// turn ends by itself.
+const advanceDelay = 1200 * time.Millisecond
+
 // TurnTime is the default time per turn; the menu can change or disable it.
 const TurnTime = 30 * time.Second
 
@@ -58,6 +74,8 @@ type Model struct {
 	animating  bool   // a frame loop is running
 
 	hoverKey string // key of the button under the mouse, for highlighting
+
+	advancePending bool // an advanceMsg is on its way
 }
 
 // New starts a fresh game with the default rules.
@@ -65,8 +83,10 @@ func New() Model { return newGame(game.DefaultRules, TurnTime) }
 
 // newGame starts a fresh game with the given rules and turn time.
 func newGame(r game.Rules, turnTime time.Duration) Model {
+	g := game.NewWithRules(r)
+	g.DeferAdvance = true // pause before the table clears (see advanceMsg)
 	return Model{
-		game:       game.NewWithRules(r),
+		game:       g,
 		width:      100,
 		height:     30,
 		timerOwner: -1,
@@ -144,6 +164,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.update(msg)
 	nm, timerCmd := next.syncTimer()
 	nm, animCmd := nm.syncAnimations()
+	if nm.game.Stuck() && !nm.advancePending {
+		nm.advancePending = true
+		ply := nm.game.Ply
+		cmd = tea.Batch(cmd, tea.Tick(advanceDelay, func(time.Time) tea.Msg { return advanceMsg{ply} }))
+	}
 	// tea.Batch runs several commands at once (here: the opponent's move,
 	// the timer tick and the next animation frame), skipping any that are nil.
 	return nm, tea.Batch(cmd, timerCmd, animCmd)
@@ -182,10 +207,38 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 		if len(m.anims) > 0 {
 			return m, opponentRetry() // let the cards land first
 		}
+		if m.game.Stuck() {
+			return m, nil // the pending advanceMsg ends the turn
+		}
+		if m.game.Rules.Difficulty.Slow() {
+			// Think in the background on a copy, so the screen stays live
+			// for the half second the search takes.
+			g, ply := m.game, m.game.Ply
+			snapshot := g.Clone()
+			return m, func() tea.Msg {
+				return botMoveMsg{state: g, ply: ply, move: snapshot.ThinkMove(game.Opponent)}
+			}
+		}
 		m.game.OpponentMove()
-		m.clampCursor()
+		return m.afterOpponent()
+
+	case botMoveMsg:
+		if msg.state != m.game || msg.ply != m.game.Ply || m.game.Turn != game.Opponent {
+			return m, nil // the game moved on (new game) while the bot was thinking
+		}
+		if m.game.Apply(game.Opponent, msg.move) != nil {
+			m.game.OpponentMove()
+		}
+		return m.afterOpponent()
+
+	case advanceMsg:
+		m.advancePending = false
+		if msg.ply == m.game.Ply {
+			m.game.Advance()
+			m.clampCursor()
+		}
 		if !m.game.Over && m.game.Turn == game.Opponent {
-			return m, opponentThinks() // the opponent still has more to do
+			return m, opponentThinks()
 		}
 
 	case tea.KeyPressMsg:
@@ -392,6 +445,16 @@ func (m Model) action(key string) (Model, tea.Cmd) {
 
 	case "s":
 		m.game.SortHand(game.You)
+	}
+	return m, nil
+}
+
+// afterOpponent tidies up after an opponent move and schedules its next one
+// if it's still their turn.
+func (m Model) afterOpponent() (Model, tea.Cmd) {
+	m.clampCursor()
+	if !m.game.Over && m.game.Turn == game.Opponent {
+		return m, opponentThinks() // the opponent still has more to do
 	}
 	return m, nil
 }

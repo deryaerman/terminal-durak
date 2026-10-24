@@ -4,6 +4,7 @@ import (
 	"math/rand/v2"
 	"runtime"
 	"sync"
+	"time"
 )
 
 // The Hard bot: Monte Carlo search over imagined deals (PIMC, "Perfect
@@ -24,8 +25,20 @@ const searchWorlds = 96
 // rolloutLimit stops an imagined game that somehow runs too long.
 const rolloutLimit = 1000
 
-// SearchMove picks a move for player p with the full Hard strategy.
-func (s *State) SearchMove(p int) Move {
+// HardPlusThinkTime is how long the hard+ bot searches per decision.
+const HardPlusThinkTime = 500 * time.Millisecond
+
+// SearchMove picks a move for player p with the Hard strategy: a fixed
+// number of imagined deals.
+func (s *State) SearchMove(p int) Move { return s.search(p, 0) }
+
+// SearchMoveFor searches for a fixed time instead (hard+), playing out as
+// many imagined deals as fit, on every CPU core.
+func (s *State) SearchMoveFor(p int, d time.Duration) Move { return s.search(p, d) }
+
+// search plays out searchWorlds deals, or, when budget > 0, keeps going
+// until the time is up.
+func (s *State) search(p int, budget time.Duration) Move {
 	moves := s.LegalMoves(p)
 	switch len(moves) {
 	case 0:
@@ -41,6 +54,7 @@ func (s *State) SearchMove(p int) Move {
 	// goroutine has its own random generator and its own slice of scores,
 	// so they never write to the same memory.
 	workers := runtime.NumCPU()
+	deadline := time.Now().Add(budget)
 	scores := make([][]float64, workers)
 	seed := rand.Uint64()
 	var wg sync.WaitGroup
@@ -50,7 +64,10 @@ func (s *State) SearchMove(p int) Move {
 		go func() {
 			defer wg.Done()
 			rng := rand.New(rand.NewPCG(seed, uint64(w)))
-			for i := w; i < searchWorlds; i += workers {
+			for i := w; ; i += workers {
+				if budget > 0 && time.Now().After(deadline) || budget == 0 && i >= searchWorlds {
+					break
+				}
 				world := s.Determinize(p, rng)
 				for mi, m := range moves {
 					g := world.Clone()

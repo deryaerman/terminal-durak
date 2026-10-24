@@ -102,7 +102,8 @@ func (s *State) Apply(p int, m Move) error {
 // Clone returns an independent deep copy, so a bot can play out imagined
 // games without touching the real one.
 func (s *State) Clone() *State {
-	c := *s // copies every plain field
+	c := *s                // copies every plain field
+	c.DeferAdvance = false // imagined games never wait for the UI
 	c.Deck = &cards.Deck{Cards: slices.Clone(s.Deck.Cards)}
 	for i, p := range s.Players {
 		c.Players[i] = &Player{Name: p.Name, Hand: slices.Clone(p.Hand)}

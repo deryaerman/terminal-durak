@@ -24,6 +24,10 @@ func (s *State) AutoMove(p int) {
 		}
 	case Hard:
 		m = s.SearchMove(p)
+	case HardPlus:
+		m = s.SearchMoveFor(p, HardPlusThinkTime)
+	case Expert:
+		m = s.ISMCTSMove(p, ExpertThinkTime)
 	default:
 		s.easyMove(p)
 		return

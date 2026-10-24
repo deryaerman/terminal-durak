@@ -53,13 +53,39 @@ type Rules struct {
 type Difficulty int
 
 const (
-	Easy   Difficulty = iota // the original simple bot
-	Normal                   // card counting and sensible habits (heuristic.go)
-	Hard                     // Monte Carlo search plus a perfect endgame (search.go, endgame.go)
+	Easy     Difficulty = iota // the original simple bot
+	Normal                     // card counting and a perfect endgame (heuristic.go, endgame.go)
+	Hard                       // plus Monte Carlo search over 96 imagined deals (search.go)
+	HardPlus                   // the same search, but for a fixed half second per move
+	Expert                     // ISMCTS: a search tree over imagined deals, half a second (ismcts.go)
+
+	NumDifficulties = 5
 )
 
 func (d Difficulty) String() string {
-	return [...]string{"easy", "normal", "hard"}[d]
+	return [...]string{"easy", "normal", "hard", "hard+", "expert"}[d]
+}
+
+// Slow reports whether this level thinks long enough that the UI should run
+// it in the background.
+func (d Difficulty) Slow() bool { return d == HardPlus || d == Expert }
+
+// ThinkMove picks p's move at this difficulty without changing s. The UI
+// calls it on a copy in the background for the slow levels.
+func (s *State) ThinkMove(p int) Move {
+	switch s.Rules.Difficulty {
+	case Expert:
+		return s.ISMCTSMove(p, ExpertThinkTime)
+	case HardPlus:
+		return s.SearchMoveFor(p, HardPlusThinkTime)
+	case Hard:
+		return s.SearchMove(p)
+	default:
+		if m, ok := s.EndgameMove(p); ok {
+			return m
+		}
+		return s.HeuristicMove(p)
+	}
 }
 
 // DefaultRules are the classic rules: pass-on Durak with throw-in after take.
@@ -86,11 +112,19 @@ type State struct {
 	// the whole game. A pointer, so copies of the state share it.
 	endgameCache *[2]map[posKey]float64
 
-	Turn     int    // whose move it is right now
-	Discards int    // cards beaten and removed from play
-	Status   string // last thing that happened, shown to the player
-	Over     bool   // the game has ended
-	Loser    int    // the durak: You, Opponent, or Draw when both ran out together
+	Turn     int // whose move it is right now
+	Discards int // cards beaten and removed from play
+
+	// DeferAdvance stops a stuck attacker's turn from ending instantly; the
+	// UI sets it and calls Advance after a pause. Copies made with Clone
+	// (the bots' imagined games) always advance instantly.
+	DeferAdvance bool
+	// Ply counts the moves made so far. The UI uses it to check that a move
+	// the bot worked out in the background still fits the current game.
+	Ply    int
+	Status string // last thing that happened, shown to the player
+	Over   bool   // the game has ended
+	Loser  int    // the durak: You, Opponent, or Draw when both ran out together
 }
 
 // Errors returned by moves. The UI shows them in the status line.
@@ -175,6 +209,7 @@ func (s *State) Undefended() int {
 // Play puts card i from player p's hand on the table: as a new attack when p
 // is attacking, or on the first undefended attack when p is defending.
 func (s *State) Play(p, i int) error {
+	s.Ply++
 	if s.Over {
 		return ErrGameOver
 	}
@@ -221,7 +256,27 @@ func (s *State) Play(p, i int) error {
 // the attack passes to the defender, the round ends if everything is beaten,
 // or the cards are handed over if the defender is taking.
 func (s *State) advanceIfStuck() {
-	if !s.Over && s.Turn == s.Attacker && len(s.Table) > 0 && !s.canAdd(s.Attacker) {
+	// When the table is about to clear (everything beaten, or the defender
+	// taking), the UI may want to pause first so the last card stays
+	// visible; it then calls Advance itself. Passing the attack on to the
+	// defender never waits.
+	if s.DeferAdvance && (s.Undefended() < 0 || s.Taking) {
+		return
+	}
+	s.Advance()
+}
+
+// Stuck reports whether the attacker is on the move with nothing they're
+// allowed to add, so their turn should end by itself.
+func (s *State) Stuck() bool {
+	return !s.Over && s.Turn == s.Attacker && len(s.Table) > 0 && !s.canAdd(s.Attacker)
+}
+
+// Advance ends a stuck attacker's turn. With DeferAdvance set, the UI calls
+// this itself after a short pause, so you can see the last card that was
+// played before the table clears.
+func (s *State) Advance() {
+	if s.Stuck() {
 		_ = s.EndTurn()
 	}
 }
@@ -291,6 +346,7 @@ func (s *State) CanTransfer(card cards.Card) bool {
 // Transfer ("return defence") adds card i as one more attack and swaps the
 // roles: the old attacker now has to beat every card on the table.
 func (s *State) Transfer(p, i int) error {
+	s.Ply++
 	if s.Over {
 		return ErrGameOver
 	}
@@ -318,6 +374,7 @@ func (s *State) Transfer(p, i int) error {
 // EndTurn hands the move to the other player. When the attacker ends their
 // turn and every attack on the table is beaten, the round is over.
 func (s *State) EndTurn() error {
+	s.Ply++
 	if s.Over {
 		return ErrGameOver
 	}
@@ -346,6 +403,7 @@ func (s *State) EndTurn() error {
 // first throw in more (see EndTurn); otherwise the cards are collected now.
 // Either way the same attacker attacks again next round.
 func (s *State) Take() {
+	s.Ply++
 	if s.Over || s.Taking {
 		return
 	}
