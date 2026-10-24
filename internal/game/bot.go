@@ -8,11 +8,33 @@ import "durak/internal/cards"
 // bot (or a second human over the network) exists.
 func (s *State) OpponentMove() { s.AutoMove(Opponent) }
 
-// AutoMove plays player p's turn with the simple strategy above.
+// AutoMove makes one move for player p at the chosen difficulty: Easy uses
+// the simple strategy in this file, Normal the card-counting heuristic plus
+// the perfect endgame, and Hard adds Monte Carlo search on top.
 func (s *State) AutoMove(p int) {
 	if s.Over || s.Turn != p {
 		return
 	}
+	var m Move
+	switch s.Rules.Difficulty {
+	case Normal:
+		var ok bool
+		if m, ok = s.EndgameMove(p); !ok {
+			m = s.HeuristicMove(p)
+		}
+	case Hard:
+		m = s.SearchMove(p)
+	default:
+		s.easyMove(p)
+		return
+	}
+	if s.Apply(p, m) != nil {
+		s.easyMove(p) // never get stuck: fall back to the simple bot
+	}
+}
+
+// easyMove is the original simple strategy.
+func (s *State) easyMove(p int) {
 	if p == s.Attacker {
 		s.botAttack(p)
 	} else {

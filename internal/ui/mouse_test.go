@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"durak/internal/cards"
 	"durak/internal/game"
 )
 
@@ -52,6 +53,11 @@ func TestClickPlaysCard(t *testing.T) {
 
 func TestEndTurnButton(t *testing.T) {
 	m := ready()
+	// Hold a pair, so after leading one seven you could still add the other
+	// and the turn doesn't pass on by itself.
+	m.game.Players[game.You].Hand = []cards.Card{
+		{Rank: cards.Seven, Suit: cards.Spades}, {Rank: cards.Seven, Suit: cards.Clubs}, {Rank: cards.Ace, Suit: cards.Diamonds}}
+	m = send(m, tea.WindowSizeMsg{Width: 100, Height: 40}) // refresh the layout
 	x, y := centreOf(m, 0)
 	m = send(m, tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft}) // attack
 	if len(m.lastLayout.buttons) != 1 {

@@ -92,6 +92,7 @@ func TestGameOver(t *testing.T) {
 func TestFullGamesFinish(t *testing.T) {
 	for g := 0; g < 200; g++ {
 		s := New()
+		s.Rules.Difficulty = Normal // Hard is too slow for 200 games here; arena_test covers it
 		for step := 0; !s.Over; step++ {
 			if step > 5000 {
 				t.Fatalf("game %d never ended", g)

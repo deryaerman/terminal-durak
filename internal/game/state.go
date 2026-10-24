@@ -45,10 +45,25 @@ type Rules struct {
 	// ThrowInAfterTake lets the attacker add more matching cards after the
 	// defender decides to take; the defender then picks those up too.
 	ThrowInAfterTake bool
+	// Difficulty picks the computer opponent: Easy, Normal or Hard.
+	Difficulty Difficulty
+}
+
+// Difficulty is how strong the computer opponent plays.
+type Difficulty int
+
+const (
+	Easy   Difficulty = iota // the original simple bot
+	Normal                   // card counting and sensible habits (heuristic.go)
+	Hard                     // Monte Carlo search plus a perfect endgame (search.go, endgame.go)
+)
+
+func (d Difficulty) String() string {
+	return [...]string{"easy", "normal", "hard"}[d]
 }
 
 // DefaultRules are the classic rules: pass-on Durak with throw-in after take.
-var DefaultRules = Rules{PassOn: true, ThrowInAfterTake: true}
+var DefaultRules = Rules{PassOn: true, ThrowInAfterTake: true, Difficulty: Hard}
 
 // State is everything about one match.
 type State struct {
@@ -57,9 +72,20 @@ type State struct {
 	Trump    cards.Card // the face-up card under the deck; its suit is trump
 	Players  [2]*Player
 	Table    []Pair
-	Attacker int    // who is attacking right now (changes when the attack is passed on)
-	Leader   int    // who started this round's attack; draws first when it ends
-	Taking   bool   // the defender has given up; the attacker may still add cards
+	Attacker int  // who is attacking right now (changes when the attack is passed on)
+	Leader   int  // who started this round's attack; draws first when it ends
+	Taking   bool // the defender has given up; the attacker may still add cards
+
+	// What everyone at the table has seen (memory.go): cards discarded for
+	// good, and cards known to be in each player's hand because they picked
+	// them up from the table or drew the face-up trump.
+	Gone  cards.Set
+	Known [2]cards.Set
+
+	// The endgame solver's memory of positions, per point of view, kept for
+	// the whole game. A pointer, so copies of the state share it.
+	endgameCache *[2]map[posKey]float64
+
 	Turn     int    // whose move it is right now
 	Discards int    // cards beaten and removed from play
 	Status   string // last thing that happened, shown to the player
@@ -181,6 +207,7 @@ func (s *State) Play(p, i int) error {
 		s.Table[u].Defense = &card
 	}
 	s.Players[p].Hand = slices.Delete(hand, i, i+1)
+	s.Known[p] = s.Known[p].Remove(card)
 	s.Status = fmt.Sprintf("%s played %v", s.Players[p].Name, card)
 	if p != s.Attacker && s.Undefended() < 0 {
 		s.Turn = s.Attacker // everything is beaten: nothing left for the defender to do
@@ -276,6 +303,7 @@ func (s *State) Transfer(p, i int) error {
 	}
 	s.Table = append(s.Table, Pair{Attack: card})
 	s.Players[p].Hand = slices.Delete(s.Players[p].Hand, i, i+1)
+	s.Known[p] = s.Known[p].Remove(card)
 	s.Attacker = p
 	s.Status = fmt.Sprintf("%s passed the attack on with %v", s.Players[p].Name, card)
 	if s.Rules.PassOnMany && s.canAdd(p) {
@@ -350,6 +378,7 @@ func (s *State) collect() {
 			d.Hand = append(d.Hand, *pair.Defense)
 		}
 	}
+	s.Known[s.Defender()] = s.Known[s.Defender()].Union(s.tableSet()) // everyone saw them
 	s.Status = fmt.Sprintf("%s took %d cards", d.Name, s.tableCount())
 	s.finishRound(true)
 }
@@ -359,6 +388,7 @@ func (s *State) collect() {
 // the defender becomes the attacker.
 func (s *State) finishRound(taken bool) {
 	if !taken {
+		s.Gone = s.Gone.Union(s.tableSet())
 		s.Discards += s.tableCount()
 		s.Status = "All attacks beaten — the cards are discarded"
 	}
@@ -405,6 +435,9 @@ func (s *State) DrawUp(p int) {
 	}
 	drawn, _ := s.Deck.Draw(need)
 	s.Players[p].Hand = append(s.Players[p].Hand, drawn...)
+	if s.Deck.Len() == 0 && slices.Contains(drawn, s.Trump) {
+		s.Known[p] = s.Known[p].Add(s.Trump) // the face-up trump went to p
+	}
 }
 
 // SortHand orders player p's hand by suit, then rank, with trumps last.
@@ -431,4 +464,16 @@ func (s *State) tableCount() int {
 		}
 	}
 	return n
+}
+
+// tableSet is every card on the table, attacks and defences.
+func (s *State) tableSet() cards.Set {
+	var t cards.Set
+	for _, p := range s.Table {
+		t = t.Add(p.Attack)
+		if p.Defense != nil {
+			t = t.Add(*p.Defense)
+		}
+	}
+	return t
 }

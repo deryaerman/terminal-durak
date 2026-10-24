@@ -30,6 +30,7 @@ func TestMenuTogglesRules(t *testing.T) {
 	m = press(m, keyEnter)               // pass-on off
 	m = press(m, keyDown, keyEnter)      // several cards: disabled now, no change
 	m = press(m, keyDown, keyEnter)      // throw-in after take off
+	m = press(m, keyDown)                // opponent: leave as is
 	m = press(m, keyDown, keyLeft, keyM) // timer 30s → 15s, close
 	r := m.game.Rules
 	if r.PassOn || r.PassOnMany || r.ThrowInAfterTake {

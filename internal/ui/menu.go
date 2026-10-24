@@ -7,6 +7,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"durak/internal/game"
 )
 
 // The rules menu: a popup opened with m. While it's open the game is paused
@@ -50,6 +52,15 @@ var menuItems = []menuItem{
 		help:   "When the defender gives up, the attacker may still add matching cards for them to pick up.",
 		value:  func(m *Model) string { return onOff(m.game.Rules.ThrowInAfterTake) },
 		change: func(m *Model, _ int) { m.game.Rules.ThrowInAfterTake = !m.game.Rules.ThrowInAfterTake },
+	},
+	{
+		label: "Opponent",
+		help:  "Easy plays simply. Normal counts cards and plays endings perfectly. Hard also imagines many possible deals and plays each move out to the end.",
+		value: func(m *Model) string { return m.game.Rules.Difficulty.String() },
+		change: func(m *Model, dir int) {
+			d := (int(m.game.Rules.Difficulty) + dir + 3) % 3 // wrap around both ways
+			m.game.Rules.Difficulty = game.Difficulty(d)
+		},
 	},
 	{
 		label: "Turn timer",
