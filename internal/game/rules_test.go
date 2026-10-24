@@ -103,3 +103,39 @@ func TestPassOnMany(t *testing.T) {
 		t.Fatalf("you should now face three sevens: turn %d table %d", s.Turn, len(s.Table))
 	}
 }
+
+func TestAutoAdvance(t *testing.T) {
+	// You lead 7♠ and still hold a 7, so you stay on the move...
+	you := []cards.Card{c(cards.Seven, cards.Spades), c(cards.Seven, cards.Clubs), c(cards.Ace, cards.Diamonds)}
+	opp := []cards.Card{c(cards.King, cards.Spades), c(cards.King, cards.Clubs), c(cards.Six, cards.Diamonds)}
+	s := fixed(cards.Hearts, you, opp)
+	_ = s.Play(You, 0)
+	if s.Turn != You {
+		t.Fatal("you can still add 7♣, so it should stay your turn")
+	}
+	// ...after adding it you have nothing left that fits: the turn passes on.
+	_ = s.Play(You, 0)
+	if s.Turn != Opponent {
+		t.Fatal("no more sevens: the turn should pass to the defender")
+	}
+	// The opponent beats both; you can't add anything, so the round ends
+	// without anyone pressing space.
+	_ = s.Play(Opponent, 0) // K♠ on 7♠
+	_ = s.Play(Opponent, 0) // K♣ on 7♣
+	if len(s.Table) != 0 || s.Attacker != Opponent {
+		t.Fatalf("round should end by itself: table %d, attacker %d", len(s.Table), s.Attacker)
+	}
+}
+
+func TestDefenderTurnEndsWhenAllBeaten(t *testing.T) {
+	// You can still throw in a king after the defence, so the round goes on,
+	// but the defender has nothing left to do: the move comes back to you.
+	you := []cards.Card{c(cards.Seven, cards.Spades), c(cards.King, cards.Diamonds)}
+	opp := []cards.Card{c(cards.King, cards.Spades), c(cards.Six, cards.Clubs), c(cards.Six, cards.Diamonds)}
+	s := fixed(cards.Hearts, you, opp)
+	_ = s.Play(You, 0)      // 7♠ — no other seven, passes on by itself
+	_ = s.Play(Opponent, 0) // K♠
+	if s.Turn != You || len(s.Table) != 1 {
+		t.Fatalf("you may add K♦, so it should be your move: turn %d table %d", s.Turn, len(s.Table))
+	}
+}

@@ -150,16 +150,22 @@ func (m Model) menuView() string {
 	help := lipgloss.NewStyle().Width(labelW + 16).Foreground(colDim).
 		Render(menuItems[m.menuCursor].help)
 	rows = append(rows, "", help, "",
-		dimStyle.Render("↑/↓ choose · enter/←/→ change · m close"))
+		dimStyle.Render("↑/↓ or hover choose · enter/click change · m close"))
 
 	return menuStyle.Render(strings.Join(rows, "\n"))
+}
+
+// menuBox is the popup's position and size on screen.
+func (m Model) menuBox() (x, y, w, h int) {
+	box := m.menuView()
+	w, h = lipgloss.Width(box), lipgloss.Height(box)
+	return max(0, (m.width-w)/2), max(0, (m.height-h)/2), w, h
 }
 
 // withMenu draws the menu box on top of the game screen, centred.
 func (m Model) withMenu(screen string) string {
 	box := m.menuView()
-	x := max(0, (m.width-lipgloss.Width(box))/2)
-	y := max(0, (m.height-lipgloss.Height(box))/2)
+	x, y, _, _ := m.menuBox()
 	return lipgloss.NewCompositor(
 		lipgloss.NewLayer(screen),
 		lipgloss.NewLayer(box).X(x).Y(y).Z(1),

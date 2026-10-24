@@ -182,7 +182,21 @@ func (s *State) Play(p, i int) error {
 	}
 	s.Players[p].Hand = slices.Delete(hand, i, i+1)
 	s.Status = fmt.Sprintf("%s played %v", s.Players[p].Name, card)
+	if p != s.Attacker && s.Undefended() < 0 {
+		s.Turn = s.Attacker // everything is beaten: nothing left for the defender to do
+	}
+	s.advanceIfStuck()
 	return nil
+}
+
+// advanceIfStuck ends the attacker's turn automatically when they have no
+// card they're allowed to add, so nobody has to press space for nothing:
+// the attack passes to the defender, the round ends if everything is beaten,
+// or the cards are handed over if the defender is taking.
+func (s *State) advanceIfStuck() {
+	if !s.Over && s.Turn == s.Attacker && len(s.Table) > 0 && !s.canAdd(s.Attacker) {
+		_ = s.EndTurn()
+	}
 }
 
 // checkAttack says whether the attacker may put card on the table.
@@ -295,6 +309,7 @@ func (s *State) EndTurn() error {
 		return ErrMustBeatOrTake // a defender can't just walk away
 	}
 	s.Turn = 1 - s.Turn
+	s.advanceIfStuck()
 	return nil
 }
 

@@ -2,3 +2,7 @@
 
 # Local notes for Claude sessions
 CLAUDE.md
+
+# Built binaries (go build)
+/durak
+*.exe

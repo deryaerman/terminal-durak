@@ -46,8 +46,8 @@ func TestTransfer(t *testing.T) {
 	if err := s.Play(You, 0); err != nil { // you attack with 7♠
 		t.Fatal(err)
 	}
-	if err := s.EndTurn(); err != nil {
-		t.Fatal(err)
+	if s.Turn != Opponent { // you have no other seven to add
+		t.Fatal("with nothing left to add, the attack should pass to the opponent by itself")
 	}
 	// Opponent can't beat 7♠ with 7♦, so playing it passes the attack back.
 	if err := s.Play(Opponent, 0); err != nil {
@@ -76,14 +76,9 @@ func TestNoTransferAfterDefence(t *testing.T) {
 func TestGameOver(t *testing.T) {
 	s := fixed(cards.Hearts, []cards.Card{c(cards.Seven, cards.Spades)},
 		[]cards.Card{c(cards.King, cards.Spades), c(cards.Six, cards.Clubs)})
-	s.Deck.Cards = nil // deck empty: the endgame
-	_ = s.Play(You, 0) // your last card
-	_ = s.EndTurn()
-	_ = s.Play(Opponent, 0) // K♠ beats it
-	_ = s.EndTurn()         // opponent hands back to you, the attacker
-	if err := s.EndTurn(); err != nil {
-		t.Fatal(err) // you end the round with everything beaten
-	}
+	s.Deck.Cards = nil      // deck empty: the endgame
+	_ = s.Play(You, 0)      // your last card; the turn passes on by itself
+	_ = s.Play(Opponent, 0) // K♠ beats it, and with nothing to add the round ends
 	if !s.Over || s.Loser != Opponent {
 		t.Fatalf("Over=%v Loser=%d, want game over with the opponent as durak", s.Over, s.Loser)
 	}
@@ -159,7 +154,10 @@ func TestAttackLimitedByDefenderHand(t *testing.T) {
 	s := fixed(cards.Hearts, you, opp)
 	_ = s.Play(You, 0)
 	_ = s.Play(You, 0)
-	if err := s.Play(You, 0); err != ErrTableFull {
+	if err := s.checkAttack(c(cards.Seven, cards.Diamonds)); err != ErrTableFull {
 		t.Errorf("third attack against a 2-card hand: got %v, want ErrTableFull", err)
+	}
+	if s.Turn != Opponent {
+		t.Error("with no legal card left, the turn should pass to the defender by itself")
 	}
 }

@@ -56,6 +56,8 @@ type Model struct {
 	anims      []anim
 	lastLayout layout // where every card was after the previous Update
 	animating  bool   // a frame loop is running
+
+	hoverKey string // key of the button under the mouse, for highlighting
 }
 
 // New starts a fresh game with the default rules.
@@ -190,73 +192,10 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.menuOpen {
 			return m.updateMenu(msg)
 		}
-		m.err = nil
-		hand := m.game.Players[game.You].Hand
+		return m.action(msg.String())
 
-		switch msg.String() {
-		case "q", "ctrl+c":
-			return m, tea.Quit
-
-		case "m":
-			return m.openMenu(), nil
-
-		case "n":
-			if m.game.Over {
-				// Keep the rules and timer setting chosen in the menu.
-				nm := newGame(m.game.Rules, m.turnTime).withSize(m.width, m.height)
-				nm.timerID = m.timerID // so the old game's ticks stay stale
-				return nm, nm.opponentIfTheirTurn()
-			}
-
-		case "left", "h":
-			if m.cursor > 0 {
-				m.cursor--
-			}
-
-		case "right", "l":
-			if m.cursor < len(hand)-1 {
-				m.cursor++
-			}
-
-		case "enter":
-			if len(hand) > 0 {
-				m.err = m.game.Play(game.You, m.cursor)
-				m.clampCursor()
-				if m.game.Turn == game.Opponent { // you passed the attack on
-					return m, opponentThinks()
-				}
-			}
-
-		case "r":
-			if len(hand) > 0 {
-				m.err = m.game.Transfer(game.You, m.cursor)
-				m.clampCursor()
-				if m.err == nil {
-					return m, opponentThinks()
-				}
-			}
-
-		case "space", " ":
-			if m.game.Turn != game.You {
-				m.err = game.ErrNotYourTurn
-				break
-			}
-			m.err = m.game.EndTurn()
-			m.clampCursor()
-			if m.err == nil && m.game.Turn == game.Opponent {
-				return m, opponentThinks()
-			}
-
-		case "t":
-			if m.game.Turn == game.You && m.game.Defender() == game.You && len(m.game.Table) > 0 {
-				m.game.Take()
-				m.clampCursor()
-				return m, opponentThinks() // opponent attacks again
-			}
-
-		case "s":
-			m.game.SortHand(game.You)
-		}
+	case tea.MouseMotionMsg, tea.MouseClickMsg, tea.MouseWheelMsg:
+		return m.handleMouse(msg.(tea.MouseMsg))
 	}
 	return m, nil
 }
@@ -283,6 +222,8 @@ func (m Model) View() tea.View {
 
 	v := tea.NewView(screen)
 	v.AltScreen = true // draw on a separate full screen, restored on quit
+	// Report every mouse movement, not just drags, so hovering selects cards.
+	v.MouseMode = tea.MouseModeAllMotion
 	v.WindowTitle = "Durak"
 	return v
 }
@@ -309,8 +250,9 @@ func (m Model) render() (string, layout) {
 	playable := func(c cards.Card) bool {
 		return g.Turn != game.You || g.CanPlay(game.You, c)
 	}
+	youTop, buttons := m.youRow(0) // y is filled in below
 	you := lipgloss.JoinVertical(lipgloss.Left,
-		badgeRow(m.width, m.youBadge(), m.timerBar()),
+		youTop,
 		center(r.hand(g.Players[game.You].Hand, m.cursor, playable)))
 
 	status := statusStyle.Render(g.Status)
@@ -334,6 +276,10 @@ func (m Model) render() (string, layout) {
 
 	lay := m.computeLayout(r, lipgloss.Height(opponent), midH,
 		lipgloss.Width(deck), tableW)
+	for i := range buttons {
+		buttons[i].y = lipgloss.Height(opponent) + midH // the row above your hand
+	}
+	lay.buttons = buttons
 	return screen, lay
 }
 
@@ -375,4 +321,77 @@ func (m Model) helpLine() string {
 		help += "t take cards · "
 	}
 	return help + "s sort · m rules · q quit"
+}
+
+// action performs what a key does. Mouse clicks on buttons and cards call it
+// too, so the mouse and keyboard always behave the same way.
+func (m Model) action(key string) (Model, tea.Cmd) {
+	m.err = nil
+	hand := m.game.Players[game.You].Hand
+
+	switch key {
+	case "q", "ctrl+c":
+		return m, tea.Quit
+
+	case "m":
+		return m.openMenu(), nil
+
+	case "n":
+		if m.game.Over {
+			// Keep the rules and timer setting chosen in the menu.
+			nm := newGame(m.game.Rules, m.turnTime).withSize(m.width, m.height)
+			nm.timerID = m.timerID // so the old game's ticks stay stale
+			return nm, nm.opponentIfTheirTurn()
+		}
+
+	case "left", "h":
+		if m.cursor > 0 {
+			m.cursor--
+		}
+
+	case "right", "l":
+		if m.cursor < len(hand)-1 {
+			m.cursor++
+		}
+
+	case "enter":
+		if len(hand) > 0 {
+			m.err = m.game.Play(game.You, m.cursor)
+			m.clampCursor()
+			if m.game.Turn == game.Opponent { // you passed the attack on
+				return m, opponentThinks()
+			}
+		}
+
+	case "r":
+		if len(hand) > 0 {
+			m.err = m.game.Transfer(game.You, m.cursor)
+			m.clampCursor()
+			if m.err == nil {
+				return m, opponentThinks()
+			}
+		}
+
+	case "space", " ":
+		if m.game.Turn != game.You {
+			m.err = game.ErrNotYourTurn
+			break
+		}
+		m.err = m.game.EndTurn()
+		m.clampCursor()
+		if m.err == nil && m.game.Turn == game.Opponent {
+			return m, opponentThinks()
+		}
+
+	case "t":
+		if m.game.Turn == game.You && m.game.Defender() == game.You && len(m.game.Table) > 0 {
+			m.game.Take()
+			m.clampCursor()
+			return m, opponentThinks() // opponent attacks again
+		}
+
+	case "s":
+		m.game.SortHand(game.You)
+	}
+	return m, nil
 }

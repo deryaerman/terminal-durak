@@ -22,8 +22,9 @@ func (s *State) AutoMove(p int) {
 
 func (s *State) botAttack(p int) {
 	if s.Taking {
-		// The defender is taking: hand over every cheap matching card.
-		for {
+		// The defender is taking: hand over every cheap matching card. (Play
+		// collects the cards by itself once nothing more can be added.)
+		for s.Taking {
 			i := s.cheapest(s.Players[p].Hand, func(c cards.Card) bool {
 				return c.Suit != s.Trump.Suit && s.checkAttack(c) == nil
 			})
@@ -80,8 +81,11 @@ func (s *State) botDefend(p int) {
 		}
 		_ = s.Play(p, pick)
 	}
-	s.Status = s.Players[p].Name + " beat everything — add more or press space to end the round"
-	s.Turn = s.Attacker
+	// Play hands the turn back to the attacker once everything is beaten, and
+	// ends the round straight away if they have nothing to add.
+	if len(s.Table) > 0 {
+		s.Status = s.Players[p].Name + " beat everything — add more or press space to end the round"
+	}
 }
 
 // cheapest returns the index of the lowest-value card in hand that ok accepts

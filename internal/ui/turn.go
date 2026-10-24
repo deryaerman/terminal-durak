@@ -16,7 +16,7 @@ import (
 
 var (
 	colGo   = lipgloss.Color("#5fd787") // timer: plenty of time
-	colDark = lipgloss.Color("#1c1c1c") // text on a coloured badge
+	colDark = lipgloss.Color("#1c1c1c") // text on a coloured badge or button
 
 	badgeBase = lipgloss.NewStyle().Bold(true).Foreground(colDark).Padding(0, 1)
 
@@ -43,7 +43,7 @@ func (m Model) youBadge() string {
 	case g.Attacker != game.You:
 		return defendBadge.Render("⚔ DEFEND")
 	case g.Taking:
-		return takingBadge.Render("➕ ADD CARDS OR SPACE")
+		return takingBadge.Render("➕ ADD CARDS")
 	default:
 		return attackBadge.Render("▶ YOUR ATTACK")
 	}

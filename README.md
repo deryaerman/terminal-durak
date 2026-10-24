@@ -32,6 +32,8 @@ Defend!  Opponent passed the attack on with 8♥
 
 - A full 36-card game (6 to Ace) against a computer opponent
 - Card art that scales with your terminal size, red and black suits, trump cards edged in gold, and cards you can't play faded out
+- Animated cards: dealing, playing, drawing and clearing the table
+- Mouse support: hover, click and scroll
 - Defence cards drawn overlapping the attack they beat, on a green felt table
 - Durak rules: attacks must match a rank already on the table, defend with a higher card of the same suit or with a trump, take the cards, throw more in, and **pass the attack on** (the "perevodnoy" variant)
 - The game ends and names the durak once the deck has run out
@@ -66,6 +68,8 @@ go build -o durak .
 | `m` | Open the rules menu (pauses the game) |
 | `n` | Start a new game (after a game ends) |
 | `q` / `ctrl+c` | Quit |
+
+**Mouse:** hover over a card to select it, click to play it, and scroll to move the selection. Buttons such as **End turn**, **Take** and **New game** appear next to your turn badge. In the rules menu, hover to choose a rule, click to change it, and click outside the menu to close it.
 
 ## How to play
 
@@ -111,8 +115,6 @@ go fmt ./...    # format the code
 
 ## Roadmap
 
-- [ ] Mouse support: click a card to play it
-- [ ] Card animations
 - [ ] A smarter computer opponent
 - [ ] Online multiplayer
 - [ ] More than two players

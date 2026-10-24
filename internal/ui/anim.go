@@ -46,6 +46,11 @@ type layout struct {
 	cards   map[cards.Card]spot
 	deck    spot // the face-down deck pile
 	discard spot // where discarded cards fly to (under the deck panel)
+
+	// For mouse hit-testing (mouse.go).
+	cardW, cardH int
+	handY        int      // top row of your hand (where the lifted card starts)
+	buttons      []hitbox // clickable buttons next to your badge
 }
 
 // anim is one card flying from one spot to another.
@@ -96,7 +101,7 @@ func (m Model) computeLayout(r renderer, oppH, midH, deckW, tableW int) layout {
 	g := m.game
 	w, h := r.size.w, r.size.h
 	W := m.width
-	lay := layout{cards: map[cards.Card]spot{}}
+	lay := layout{cards: map[cards.Card]spot{}, cardW: w, cardH: h}
 	leftOf := func(contentW int) int { return max(0, (W-contentW)/2) }
 
 	// Opponent's hand, top row.
@@ -142,6 +147,7 @@ func (m Model) computeLayout(r renderer, oppH, midH, deckW, tableW int) layout {
 
 	// Your hand: under the badge row; the selected card is one line higher.
 	handY := y0 + midH + 1
+	lay.handY = handY
 	you := g.Players[game.You].Hand
 	x0 = leftOf(len(you) * w)
 	for i, c := range you {
