@@ -25,7 +25,7 @@ import (
 // Any type can be a message; an empty struct is the usual choice for a signal.
 type opponentMoveMsg struct{}
 
-// botMoveMsg carries a move a slow bot (hard+, expert) worked out in the background. The
+// botMoveMsg carries a move a slow bot (hard, expert) worked out in the background. The
 // state pointer and move count say which position it was meant for.
 type botMoveMsg struct {
 	state *game.State

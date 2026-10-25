@@ -53,22 +53,21 @@ type Rules struct {
 type Difficulty int
 
 const (
-	Easy     Difficulty = iota // the original simple bot
-	Normal                     // card counting and a perfect endgame (heuristic.go, endgame.go)
-	Hard                       // plus Monte Carlo search over 96 imagined deals (search.go)
-	HardPlus                   // the same search, but for a fixed half second per move
-	Expert                     // ISMCTS: a search tree over imagined deals, half a second (ismcts.go)
+	Easy   Difficulty = iota // the original simple bot
+	Normal                   // card counting and a perfect endgame (heuristic.go, endgame.go)
+	Hard                     // plus Monte Carlo search over imagined deals, half a second (search.go)
+	Expert                   // ISMCTS: a search tree over imagined deals, half a second (ismcts.go)
 
-	NumDifficulties = 5
+	NumDifficulties = 4
 )
 
 func (d Difficulty) String() string {
-	return [...]string{"easy", "normal", "hard", "hard+", "expert"}[d]
+	return [...]string{"easy", "normal", "hard", "expert"}[d]
 }
 
 // Slow reports whether this level thinks long enough that the UI should run
 // it in the background.
-func (d Difficulty) Slow() bool { return d == HardPlus || d == Expert }
+func (d Difficulty) Slow() bool { return d == Hard || d == Expert }
 
 // ThinkMove picks p's move at this difficulty without changing s. The UI
 // calls it on a copy in the background for the slow levels.
@@ -76,10 +75,8 @@ func (s *State) ThinkMove(p int) Move {
 	switch s.Rules.Difficulty {
 	case Expert:
 		return s.ISMCTSMove(p, ExpertThinkTime)
-	case HardPlus:
-		return s.SearchMoveFor(p, HardPlusThinkTime)
 	case Hard:
-		return s.SearchMove(p)
+		return s.SearchMove(p, HardThinkTime)
 	default:
 		if m, ok := s.EndgameMove(p); ok {
 			return m
@@ -89,7 +86,7 @@ func (s *State) ThinkMove(p int) Move {
 }
 
 // DefaultRules are the classic rules: pass-on Durak with throw-in after take.
-var DefaultRules = Rules{PassOn: true, ThrowInAfterTake: true, Difficulty: Hard}
+var DefaultRules = Rules{PassOn: true, ThrowInAfterTake: true, Difficulty: Expert}
 
 // State is everything about one match.
 type State struct {

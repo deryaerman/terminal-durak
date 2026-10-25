@@ -19,26 +19,15 @@ import (
 // The same worlds are used for every move, so moves are compared on equal
 // terms. Once the deck is empty, the perfect endgame solver takes over.
 
-// searchWorlds is how many imagined deals are played out per decision.
-const searchWorlds = 96
-
 // rolloutLimit stops an imagined game that somehow runs too long.
 const rolloutLimit = 1000
 
-// HardPlusThinkTime is how long the hard+ bot searches per decision.
-const HardPlusThinkTime = 500 * time.Millisecond
+// HardThinkTime is how long the Hard bot searches per decision.
+const HardThinkTime = 500 * time.Millisecond
 
-// SearchMove picks a move for player p with the Hard strategy: a fixed
-// number of imagined deals.
-func (s *State) SearchMove(p int) Move { return s.search(p, 0) }
-
-// SearchMoveFor searches for a fixed time instead (hard+), playing out as
-// many imagined deals as fit, on every CPU core.
-func (s *State) SearchMoveFor(p int, d time.Duration) Move { return s.search(p, d) }
-
-// search plays out searchWorlds deals, or, when budget > 0, keeps going
-// until the time is up.
-func (s *State) search(p int, budget time.Duration) Move {
+// SearchMove picks a move for player p with the Hard strategy, playing out
+// as many imagined deals as fit in budget, on every CPU core.
+func (s *State) SearchMove(p int, budget time.Duration) Move {
 	moves := s.LegalMoves(p)
 	switch len(moves) {
 	case 0:
@@ -65,7 +54,7 @@ func (s *State) search(p int, budget time.Duration) Move {
 			defer wg.Done()
 			rng := rand.New(rand.NewPCG(seed, uint64(w)))
 			for i := w; ; i += workers {
-				if budget > 0 && time.Now().After(deadline) || budget == 0 && i >= searchWorlds {
+				if i >= workers && time.Now().After(deadline) { // at least one deal per worker
 					break
 				}
 				world := s.Determinize(p, rng)

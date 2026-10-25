@@ -44,7 +44,9 @@ func TestArena(t *testing.T) {
 	for _, m := range []struct {
 		a, b Difficulty
 		n    int
-	}{{Normal, Easy, 400}, {Hard, Easy, 60}, {Hard, Normal, 100}} {
+	}{{Normal, Easy, 400}} {
+		// Hard and Expert think 0.5 s per move, so 120 games take about an
+		// hour; see TestArenaSlow.
 		aL, bL, d, slow := playMatch(m.n, m.a, m.b)
 		t.Logf("%-6v vs %-6v: %v is durak %4.1f%%, %v is durak %4.1f%%, draws %d  (slowest move %v)",
 			m.a, m.b, m.a, 100*float64(aL)/float64(m.n), m.b, 100*float64(bL)/float64(m.n), d, slow.Round(time.Millisecond))
@@ -53,15 +55,31 @@ func TestArena(t *testing.T) {
 
 func TestHardBotIsQuickAndLegal(t *testing.T) {
 	s := New()
-	s.Rules.Difficulty = Hard
 	for step := 0; !s.Over && step < 2000; step++ {
 		start := time.Now()
-		s.AutoMove(s.Turn)
+		if err := s.Apply(s.Turn, s.SearchMove(s.Turn, 10*time.Millisecond)); err != nil {
+			t.Fatal(err)
+		}
 		if d := time.Since(start); d > 2*time.Second {
 			t.Fatalf("a Hard move took %v", d)
 		}
 	}
 	if !s.Over {
 		t.Fatal("a Hard-vs-Hard game didn't finish")
+	}
+}
+
+// TestArenaSlow pits the half-second searchers against the levels below;
+// it takes about 2 hours:
+//
+//	DURAK_ARENA=slow go test ./internal/game -run ArenaSlow -v -timeout 3h
+func TestArenaSlow(t *testing.T) {
+	if os.Getenv("DURAK_ARENA") != "slow" {
+		t.Skip("set DURAK_ARENA=slow to run")
+	}
+	for _, m := range [][2]Difficulty{{Hard, Normal}, {Expert, Hard}} {
+		aL, bL, d, slow := playMatch(120, m[0], m[1])
+		t.Logf("%v vs %v (120 games): %v durak %d, %v durak %d, draws %d, slowest %v",
+			m[0], m[1], m[0], aL, m[1], bL, d, slow.Round(time.Millisecond))
 	}
 }

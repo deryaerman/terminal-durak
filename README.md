@@ -30,7 +30,7 @@ Defend!  Opponent passed the attack on with 8♥
 
 ## Features
 
-- A full 36-card game (6 to Ace) against a computer opponent with three levels; Hard counts cards, plays out imagined deals and plays endings perfectly
+- A full 36-card game (6 to Ace) against a computer opponent with four levels. The strongest, Expert, counts cards, searches a tree of imagined deals (ISMCTS) and plays endings perfectly.
 - Card art that scales with your terminal size, red and black suits, trump cards edged in gold, and cards you can't play faded out
 - Animated cards: dealing, playing, drawing and clearing the table
 - Mouse support: hover, click and scroll
@@ -92,7 +92,7 @@ Press `m` to change these. They apply straight away and carry over to new games.
 | Pass the attack on | on | Allows passing an attack on with a card of the same rank. Turn it off for plain throw-in (podkidnoy) Durak. |
 | Pass on with several cards | off | After passing on, you may add more cards of that rank before your opponent defends. |
 | Throw in after take | on | Once the defender gives up, the attacker may still add matching cards for them to pick up. |
-| Opponent | hard | **Easy** plays simply. **Normal** counts cards and plays the endgame perfectly. **Hard** also tries each move out across many imagined deals of the hidden cards. **Hard+** does the same for a full half second per move, on every CPU core. **Expert** grows a search tree over the imagined deals (ISMCTS) for half a second. |
+| Opponent | expert | **Easy** plays simply. **Normal** counts cards and plays the endgame perfectly. **Hard** spends half a second per move trying each move out across many imagined deals of the hidden cards, on every CPU core. **Expert** grows a search tree over those imagined deals (ISMCTS) for half a second, and is the strongest. |
 | Turn timer | 30s | Off, 15s, 30s or 60s. When it runs out, the game moves on for you: you lead your cheapest card, end your attack, or take the cards. |
 
 ## Project layout

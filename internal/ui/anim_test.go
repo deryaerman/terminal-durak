@@ -31,6 +31,7 @@ func TestLayoutMatchesScreen(t *testing.T) {
 	sizes := [][2]int{{80, 30}, {100, 40}, {140, 50}, {91, 33}}
 	for _, sz := range sizes {
 		m := New()
+		m.game.Rules.Difficulty = game.Normal // fast: this test is about positions, not play
 		m.width, m.height = sz[0], sz[1]
 		for step := 0; step < 60 && !m.game.Over; step++ {
 			m.anims = nil
