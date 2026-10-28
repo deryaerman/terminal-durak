@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -213,7 +214,7 @@ func (r renderer) table(s *game.State, width, height int) string {
 	case len(s.Table) == 0:
 		body = feltText.Render("the table is empty")
 	default:
-		body = r.piles(s)
+		body = r.piles(s, innerW)
 	}
 	// Place centres the body and fills the space around it with felt.
 	body = lipgloss.Place(innerW, innerH, lipgloss.Center, lipgloss.Center, body,
@@ -226,12 +227,13 @@ func (r renderer) table(s *game.State, width, height int) string {
 // piles draws every attack (with its defense on top) as one row. Each pile is
 // built as an exact rectangle, with felt in the gaps: any cell left as a plain
 // space would show the terminal's own background instead of green.
-func (r renderer) piles(s *game.State) string {
+func (r renderer) piles(s *game.State, width int) string {
+	r, gap, dx := r.tableFit(s, width)
 	w, h := r.size.w, r.size.h
 	pileW, pileH := w, h
 	for _, p := range s.Table {
 		if p.Defense != nil {
-			pileW, pileH = w+2, h+2 // the defense is shifted 2 right, 2 down
+			pileW, pileH = w+dx, h+2 // the defense is shifted dx right, 2 down
 		}
 	}
 	blocks := make([]string, 0, len(s.Table)*2)
@@ -248,9 +250,9 @@ func (r renderer) piles(s *game.State) string {
 			// attack's top two lines and its left two columns stay visible.
 			lines = append(lines, attack[0], attack[1])
 			for j, l := range strings.Split(r.card(*p.Defense, false), "\n") {
-				left := felt(2) // below the attack card: bare felt
+				left := felt(dx) // below the attack card: bare felt
 				if j+2 < len(attack) {
-					left = ansi.Truncate(attack[j+2], 2, "") // attack's left edge
+					left = ansi.Truncate(attack[j+2], dx, "") // attack's left edge
 				}
 				lines = append(lines, left+l)
 			}
@@ -262,11 +264,42 @@ func (r renderer) piles(s *game.State) string {
 			lines = append(lines, felt(pileW))
 		}
 		if i > 0 {
-			blocks = append(blocks, feltBlock(3, pileH))
+			blocks = append(blocks, feltBlock(gap, pileH))
 		}
 		blocks = append(blocks, strings.Join(lines, "\n"))
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, blocks...)
+}
+
+// tableFit makes sure all piles fit across the table (up to six attacks,
+// each with a defence on top). It tries, in order: the usual 3-cell gaps,
+// 1-cell gaps, smaller cards, and finally tucking each defence just 1 column
+// right of its attack instead of 2. It returns the renderer to draw the table
+// cards with, the gap between piles, and the defence's sideways offset dx.
+// computeLayout uses it too, so the animations agree with the drawing.
+func (r renderer) tableFit(s *game.State, width int) (renderer, int, int) {
+	defended := slices.ContainsFunc(s.Table, func(p game.Pair) bool { return p.Defense != nil })
+	n := len(s.Table)
+	rowW := func(size cardSize, gap, dx int) int {
+		w := size.w
+		if defended {
+			w += dx
+		}
+		return n*w + (n-1)*gap
+	}
+	if rowW(r.size, 3, 2) <= width {
+		return r, 3, 2
+	}
+	for _, dx := range []int{2, 1} {
+		for _, size := range cardSizes { // biggest first
+			if size.w <= r.size.w && rowW(size, 1, dx) <= width {
+				r.size = size
+				return r, 1, dx
+			}
+		}
+	}
+	r.size = cardSizes[len(cardSizes)-1] // a very narrow terminal: best effort
+	return r, 1, 1
 }
 
 // felt returns n cells of green table background.

@@ -157,7 +157,8 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 func (m Model) menuMouse(msg tea.MouseMsg, x, y int) (Model, tea.Cmd) {
 	bx, by, bw, bh := m.menuBox()
 	row := y - (by + 4) // border + padding + title + blank line
-	onItem := x >= bx && x < bx+bw && row >= 0 && row < len(menuItems)
+	items := m.items()
+	onItem := x >= bx && x < bx+bw && row >= 0 && row < len(items)
 
 	switch msg.(type) {
 	case tea.MouseMotionMsg:
@@ -171,13 +172,16 @@ func (m Model) menuMouse(msg tea.MouseMsg, x, y int) (Model, tea.Cmd) {
 			return m.closeMenu(), nil
 		case onItem:
 			m.menuCursor = row
-			it := menuItems[row]
-			if it.disabled == nil || !it.disabled(&m) {
+			it := items[row]
+			if !m.itemDisabled(it) {
 				dir := 1
 				if msg.Mouse().Button == tea.MouseRight {
 					dir = -1 // right-click cycles the timer backwards
 				}
 				it.change(&m, dir)
+			}
+			if m.request != "" {
+				return m.closeMenu(), nil
 			}
 		}
 	}

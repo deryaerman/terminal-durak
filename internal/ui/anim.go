@@ -127,20 +127,21 @@ func (m Model) computeLayout(r renderer, oppH, midH, deckW, tableW int) layout {
 	if !g.Over && len(g.Table) > 0 {
 		innerX, innerY := deckW+1+2, y0+2
 		innerW, innerH := tableW-4, midH-3
-		pileW, pileH := w, h
+		tr, gap, dx := r.tableFit(g, innerW) // the table may use smaller cards
+		pileW, pileH := tr.size.w, tr.size.h
 		for _, p := range g.Table {
 			if p.Defense != nil {
-				pileW, pileH = w+2, h+2
+				pileW, pileH = tr.size.w+dx, tr.size.h+2
 			}
 		}
 		n := len(g.Table)
-		rowW := n*pileW + (n-1)*3
+		rowW := n*pileW + (n-1)*gap
 		ox, oy := max(0, (innerW-rowW)/2), max(0, (innerH-pileH)/2)
 		for i, p := range g.Table {
-			px, py := innerX+ox+i*(pileW+3), innerY+oy
+			px, py := innerX+ox+i*(pileW+gap), innerY+oy
 			lay.cards[p.Attack] = spot{x: px, y: py, zone: zoneTable, faceUp: true}
 			if p.Defense != nil {
-				lay.cards[*p.Defense] = spot{x: px + 2, y: py + 2, zone: zoneTable, faceUp: true}
+				lay.cards[*p.Defense] = spot{x: px + dx, y: py + 2, zone: zoneTable, faceUp: true}
 			}
 		}
 	}
@@ -167,8 +168,23 @@ func (m Model) syncAnimations() (Model, tea.Cmd) {
 	before := m.lastLayout
 	m.lastLayout = lay
 
+	// Spots in the opponent's hand whose card disappeared. Online, the
+	// opponent's unknown cards are placeholders, so when they play one, a
+	// placeholder vanishes and a real card appears on the table "from
+	// nowhere". It should fly from where the placeholder was.
+	var vanished []spot
+	for c, s := range before.cards {
+		if _, still := lay.cards[c]; !still && s.zone == zoneOppHand {
+			vanished = append(vanished, s)
+		}
+	}
 	from := func(c cards.Card) spot {
 		if s, ok := before.cards[c]; ok {
+			return s
+		}
+		if to, ok := lay.cards[c]; ok && to.zone == zoneTable && len(vanished) > 0 {
+			s := vanished[len(vanished)-1]
+			vanished = vanished[:len(vanished)-1]
 			return s
 		}
 		// Not on screen before: it came out of the deck.

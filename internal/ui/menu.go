@@ -24,6 +24,19 @@ type menuItem struct {
 	value    func(m *Model) string // current setting, shown on the right
 	change   func(m *Model, dir int)
 	disabled func(m *Model) bool
+	always   bool                // usable in network games too (the rules there belong to the host)
+	show     func(m *Model) bool // nil: always listed
+}
+
+// items are the menu rows that apply right now.
+func (m *Model) items() []menuItem {
+	var out []menuItem
+	for _, it := range menuItems {
+		if it.show == nil || it.show(m) {
+			out = append(out, it)
+		}
+	}
+	return out
 }
 
 func onOff(b bool) string {
@@ -84,6 +97,30 @@ var menuItems = []menuItem{
 			m.timerChanged = true
 		},
 	},
+	{
+		label:  "Host a game on this Wi-Fi",
+		help:   "Wait for a friend on the same Wi-Fi to join. Your rules above are used for both of you.",
+		value:  func(m *Model) string { return "↵" },
+		change: func(m *Model, _ int) { m.request = "host" },
+		always: true,
+		show:   func(m *Model) bool { return m.net == nil },
+	},
+	{
+		label:  "Join a game on this Wi-Fi",
+		help:   "See games hosted on this Wi-Fi and pick one, or type the host's address.",
+		value:  func(m *Model) string { return "↵" },
+		change: func(m *Model, _ int) { m.request = "join" },
+		always: true,
+		show:   func(m *Model) bool { return m.net == nil },
+	},
+	{
+		label:  "Leave network game",
+		help:   "Disconnect and go back to playing the computer.",
+		value:  func(m *Model) string { return "↵" },
+		change: func(m *Model, _ int) { m.request = "leave" },
+		always: true,
+		show:   func(m *Model) bool { return m.net != nil },
+	},
 }
 
 // openMenu pauses the turn timer and shows the menu.
@@ -109,8 +146,10 @@ func (m Model) closeMenu() Model {
 
 // updateMenu handles keys while the menu is open.
 func (m Model) updateMenu(msg tea.KeyPressMsg) (Model, tea.Cmd) {
-	item := menuItems[m.menuCursor]
-	disabled := item.disabled != nil && item.disabled(&m)
+	items := m.items()
+	m.menuCursor = min(m.menuCursor, len(items)-1)
+	item := items[m.menuCursor]
+	disabled := m.itemDisabled(item)
 
 	switch msg.String() {
 	case "ctrl+c":
@@ -118,12 +157,15 @@ func (m Model) updateMenu(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	case "m", "esc", "q":
 		return m.closeMenu(), nil
 	case "up", "k":
-		m.menuCursor = (m.menuCursor + len(menuItems) - 1) % len(menuItems)
+		m.menuCursor = (m.menuCursor + len(items) - 1) % len(items)
 	case "down", "j":
-		m.menuCursor = (m.menuCursor + 1) % len(menuItems)
+		m.menuCursor = (m.menuCursor + 1) % len(items)
 	case "enter", "space", " ", "right", "l":
 		if !disabled {
 			item.change(&m, 1)
+		}
+		if m.request != "" {
+			return m.closeMenu(), nil // the App (app.go) carries it out
 		}
 	case "left", "h":
 		if !disabled {
@@ -137,13 +179,13 @@ func (m Model) updateMenu(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 // menuView draws the popup box.
 func (m Model) menuView() string {
 	labelW := 0
-	for _, it := range menuItems {
+	for _, it := range m.items() {
 		labelW = max(labelW, lipgloss.Width(it.label))
 	}
 
 	rows := []string{titleStyle.Render("GAME RULES"), ""}
-	for i, it := range menuItems {
-		disabled := it.disabled != nil && it.disabled(&m)
+	for i, it := range m.items() {
+		disabled := m.itemDisabled(it)
 		pointer := "  "
 		if i == m.menuCursor {
 			pointer = selectStyle.Render("› ")
@@ -152,6 +194,8 @@ func (m Model) menuView() string {
 		value := "‹ " + it.value(&m) + " ›"
 		row := pointer + label + "   " + value
 		switch {
+		case disabled && m.net != nil:
+			row = dimStyle.Render(pointer + label + "   " + it.value(&m) + "  (set by the host)")
 		case disabled:
 			row = dimStyle.Render(pointer + label + "   " + "(needs pass-on)")
 		case i == m.menuCursor:
@@ -160,7 +204,7 @@ func (m Model) menuView() string {
 		rows = append(rows, row)
 	}
 	help := lipgloss.NewStyle().Width(labelW + 16).Foreground(colDim).
-		Render(menuItems[m.menuCursor].help)
+		Render(m.items()[min(m.menuCursor, len(m.items())-1)].help)
 	rows = append(rows, "", help, "",
 		dimStyle.Render("↑/↓ or hover choose · enter/click change · m close"))
 
@@ -182,4 +226,13 @@ func (m Model) withMenu(screen string) string {
 		lipgloss.NewLayer(screen),
 		lipgloss.NewLayer(box).X(x).Y(y).Z(1),
 	).Render()
+}
+
+// itemDisabled: in a network game the rules belong to the host, so the menu
+// only shows them; offline, an item can depend on another (see disabled).
+func (m *Model) itemDisabled(it menuItem) bool {
+	if it.always {
+		return false
+	}
+	return m.net != nil || it.disabled != nil && it.disabled(m)
 }

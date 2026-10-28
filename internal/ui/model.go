@@ -19,6 +19,7 @@ import (
 
 	"durak/internal/cards"
 	"durak/internal/game"
+	"durak/internal/netplay"
 )
 
 // opponentMoveMsg arrives when the opponent's "thinking" delay is over.
@@ -76,6 +77,14 @@ type Model struct {
 	hoverKey string // key of the button under the mouse, for highlighting
 
 	advancePending bool // an advanceMsg is on its way
+
+	// Network play (remote.go): nil when playing the bot on this machine.
+	net   *netplay.Client
+	lobby string // shown instead of the table while there's no game yet
+
+	// request asks the App (app.go) to switch games: "host", "join", or
+	// "leave" (a network game, back to playing the computer).
+	request string
 }
 
 // New starts a fresh game with the default rules.
@@ -97,6 +106,9 @@ func newGame(r game.Rules, turnTime time.Duration) Model {
 // Init runs once at start-up: it starts your turn timer, or lets the
 // opponent move if they hold the lowest trump.
 func (m Model) Init() tea.Cmd {
+	if m.net != nil {
+		return listen(m.net) // network game: wait for the server
+	}
 	_, cmd := m.syncTimer()
 	return tea.Batch(cmd, m.opponentIfTheirTurn())
 }
@@ -119,8 +131,8 @@ func tick(id int) tea.Cmd {
 // when it passes away from you or the game ends. It's called after every
 // Update, so no individual key handler has to remember to reset the timer.
 func (m Model) syncTimer() (Model, tea.Cmd) {
-	if m.menuOpen {
-		return m, nil // paused
+	if m.game == nil || m.menuOpen && m.net == nil {
+		return m, nil // no game yet, or paused
 	}
 	owner := -1
 	if m.turnTime > 0 && !m.game.Over && m.game.Turn == game.You {
@@ -134,7 +146,9 @@ func (m Model) syncTimer() (Model, tea.Cmd) {
 	if owner < 0 {
 		return m, nil
 	}
-	m.deadline = time.Now().Add(m.turnTime)
+	if m.net == nil {
+		m.deadline = time.Now().Add(m.turnTime) // online, the server sets it
+	}
 	return m, tick(m.timerID)
 }
 
@@ -162,9 +176,12 @@ func opponentRetry() tea.Cmd {
 // Update handles one message, then lets syncTimer start or stop the turn timer.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.update(msg)
+	if next.game == nil {
+		return next, cmd // network lobby: nothing to draw yet
+	}
 	nm, timerCmd := next.syncTimer()
 	nm, animCmd := nm.syncAnimations()
-	if nm.game.Stuck() && !nm.advancePending {
+	if nm.net == nil && nm.game.Stuck() && !nm.advancePending {
 		nm.advancePending = true
 		ply := nm.game.Ply
 		cmd = tea.Batch(cmd, tea.Tick(advanceDelay, func(time.Time) tea.Msg { return advanceMsg{ply} }))
@@ -187,6 +204,9 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 	case timerTickMsg:
 		if msg.id != m.timerID || m.timerOwner != game.You {
 			return m, nil // a stale tick from a timer that was reset
+		}
+		if m.net != nil {
+			return m, tick(msg.id) // online the server times out turns; just redraw
 		}
 		if m.menuOpen {
 			return m, tick(msg.id) // paused: keep the timer alive, don't count
@@ -241,13 +261,38 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, opponentThinks()
 		}
 
+	case netMsg:
+		if msg.from != m.net {
+			return m, nil // from a connection we've already left
+		}
+		return m.handleNet(msg.Message)
+
+	case disconnectedMsg:
+		if msg.from != m.net {
+			return m, nil
+		}
+		m.game, m.lobby = nil, "Connection to the game was lost.\n\nesc back · q quit"
+		return m, nil
+
 	case tea.KeyPressMsg:
+		if m.game == nil { // the network lobby
+			switch msg.String() {
+			case "q", "ctrl+c":
+				return m, tea.Quit
+			case "esc", "m":
+				m.request = "leave" // back to playing the computer (handled by the App)
+			}
+			return m, nil
+		}
 		if m.menuOpen {
 			return m.updateMenu(msg)
 		}
 		return m.action(msg.String())
 
 	case tea.MouseMotionMsg, tea.MouseClickMsg, tea.MouseWheelMsg:
+		if m.game == nil {
+			return m, nil
+		}
 		return m.handleMouse(msg.(tea.MouseMsg))
 	}
 	return m, nil
@@ -267,10 +312,15 @@ func (m *Model) clampCursor() {
 
 // View draws the whole screen.
 func (m Model) View() tea.View {
-	screen, _ := m.render()
-	screen = m.withAnimations(screen) // flying cards on top (anim.go)
-	if m.menuOpen {
-		screen = m.withMenu(screen)
+	var screen string
+	if m.game == nil {
+		screen = m.lobbyView()
+	} else {
+		screen, _ = m.render()
+		screen = m.withAnimations(screen) // flying cards on top (anim.go)
+		if m.menuOpen {
+			screen = m.withMenu(screen)
+		}
 	}
 
 	v := tea.NewView(screen)
@@ -381,6 +431,11 @@ func (m Model) helpLine() string {
 func (m Model) action(key string) (Model, tea.Cmd) {
 	m.err = nil
 	hand := m.game.Players[game.You].Hand
+	if m.net != nil {
+		if nm, cmd, handled := m.remoteAction(key); handled {
+			return nm, cmd
+		}
+	}
 
 	switch key {
 	case "q", "ctrl+c":

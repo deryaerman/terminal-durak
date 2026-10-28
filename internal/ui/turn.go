@@ -55,10 +55,14 @@ func (m Model) opponentBadge() string {
 	if g.Over || g.Turn != game.Opponent {
 		return ""
 	}
-	if g.Attacker == game.Opponent {
-		return opponentBadge.Render("▼ OPPONENT ATTACKS…")
+	name := "OPPONENT"
+	if m.net != nil {
+		name = strings.ToUpper(g.Players[game.Opponent].Name) // a real person: use their name
 	}
-	return opponentBadge.Render("▼ OPPONENT DEFENDS…")
+	if g.Attacker == game.Opponent {
+		return opponentBadge.Render("▼ " + name + " ATTACKS…")
+	}
+	return opponentBadge.Render("▼ " + name + " DEFENDS…")
 }
 
 // timerBar draws your remaining time as a bar that drains and changes colour

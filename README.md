@@ -55,6 +55,24 @@ go build -o durak .
 ./durak
 ```
 
+## Playing over the network
+
+Two people on the same Wi-Fi can play each other. The game opens against the computer as usual; then one person opens the menu (`m`) and picks **Host a game on this Wi-Fi**, and the other picks **Join a game on this Wi-Fi** and chooses the game from the list (or types the address the host's screen shows). The host's rules apply to both players. **Leave network game** in the menu (or `esc` on a waiting screen) goes back to playing the computer.
+
+The same works from the command line. One of you hosts:
+
+```bash
+durak host                    # options: --name, --timer 30, --pass-on, --pass-many, --throw-in, --port 4747
+```
+
+and the other joins. The joining side finds the game automatically, or you can pass the address the host's screen shows:
+
+```bash
+durak join                    # or: durak join 192.168.1.23
+```
+
+The host's computer runs the game, and each player is only ever sent what they're allowed to see, so the opponent's cards never cross the network. The host's options decide the rules for both players.
+
 ## Controls
 
 | Key | Action |
@@ -119,7 +137,7 @@ DURAK_ARENA=1 go test ./internal/game -run Arena -v   # pit the bot levels again
 ## Roadmap
 
 - [ ] A neural-network opponent trained with self-play
-- [ ] Online multiplayer
+- [ ] Online multiplayer over the internet (local network play works)
 - [ ] More than two players
 
 ## License
